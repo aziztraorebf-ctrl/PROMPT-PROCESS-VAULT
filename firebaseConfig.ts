@@ -3,14 +3,15 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
-// Configuration Firebase PROD
+// Firebase configuration loaded from environment variables
+// See .env.example for required variables
 const firebaseConfig = {
-  apiKey: "AIzaSyDa0DWWJB4Ha7QLSEaKNBzl5R9zebNUoqg",
-  authDomain: "prompt-and-process-vault.firebaseapp.com",
-  projectId: "prompt-and-process-vault",
-  storageBucket: "prompt-and-process-vault.firebasestorage.app",
-  messagingSenderId: "399543017104",
-  appId: "1:399543017104:web:626e7d4d1ec9e77e0e0215"
+  apiKey: process.env.FIREBASE_API_KEY,
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.FIREBASE_APP_ID,
 };
 
 // Initialize Firebase
