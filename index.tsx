@@ -1,1045 +1,1213 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AuthProvider, useAuth } from './AuthContext';
-import { GoogleGenAI } from "@google/genai";
-import { db, storage } from './firebaseConfig';
 import { 
   collection, 
   query, 
-  orderBy, 
-  onSnapshot, 
-  addDoc, 
-  doc,
-  updateDoc, 
+  where, 
+  getDocs, 
   deleteDoc, 
-  arrayUnion,
-  serverTimestamp,
-  Timestamp,
-  writeBatch
+  doc, 
+  onSnapshot, 
+  updateDoc,
+  addDoc,
+  serverTimestamp
 } from 'firebase/firestore';
 import { 
   ref, 
   uploadBytes, 
-  getDownloadURL, 
-  deleteObject 
+  getDownloadURL,
+  deleteObject
 } from 'firebase/storage';
-import { auth } from './firebaseConfig';
+import { db, storage } from './firebaseConfig';
+import { AuthProvider, useAuth } from './AuthContext';
+import { GoogleGenAI, Type } from "@google/genai";
 
-// --- CONSTANTS & TAXONOMY ---
-const CATEGORIES = [
-  { id: 'Coding', label: '💻 Coding & Eng', color: 'bg-blue-100 text-blue-700' },
-  { id: 'Image', label: '🎨 Image & Design', color: 'bg-purple-100 text-purple-700' },
-  { id: 'Writing', label: '✍️ Writing & Content', color: 'bg-green-100 text-green-700' },
-  { id: 'Data', label: '📊 Data & Analysis', color: 'bg-amber-100 text-amber-700' },
-  { id: 'Business', label: '🚀 Strategy & Biz', color: 'bg-indigo-100 text-indigo-700' },
-  { id: 'Productivity', label: '⚡ Productivity', color: 'bg-slate-100 text-slate-700' },
-  { id: 'Other', label: '📦 Other', color: 'bg-gray-100 text-gray-700' }
+// --- Constants ---
+
+// For Prompts & Frameworks (Legacy/Tag-based navigation)
+const UNIVERSAL_TAGS = [
+  'UI/UX', 'Code', 'Marketing', 'Content', 'Data', 
+  'Productivity', 'Strategy', 'Sales', 'HR', 'Design', 'Other'
 ];
 
-const getCategoryColor = (catId: string) => {
-  const cat = CATEGORIES.find(c => c.id === catId);
-  return cat ? cat.color : 'bg-slate-100 text-slate-700';
-};
+// For Assets (Hybrid Architecture: Collections)
+const ASSET_COLLECTIONS = [
+  'Marketing & Strategy',
+  'Development & Code',
+  'Design & UI/UX',
+  'Lifestyle & Fashion',
+  'Productivity & Ops',
+  'Content Creation',
+  'Archives / Other'
+];
 
-// --- GLOBAL STYLES CONSTANTS ---
-const INPUT_CLASSES = "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-900 placeholder:text-slate-400";
+// --- Icons ---
+const IconWrapper = ({ children, ...props }: any) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    width="24" height="24" viewBox="0 0 24 24" 
+    fill="none" stroke="currentColor" strokeWidth="2" 
+    strokeLinecap="round" strokeLinejoin="round" 
+    {...props}
+  >
+    {children}
+  </svg>
+);
 
-// --- ICONS (Simple SVGs) ---
 const Icons = {
-  Dashboard: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" /></svg>,
-  Prompts: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>,
-  Frameworks: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
-  Assets: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>,
-  Workflows: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>,
-  Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
-  Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>,
-  More: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>,
-  Menu: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>,
-  X: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>,
-  ArrowLeft: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>,
-  Clock: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
-  LogOut: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>,
-  Save: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
-  Edit: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
-  Trash: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>,
-  Shield: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
-  MinusCircle: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" x2="16" y1="12" y2="12"/></svg>,
-  Magic: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 3v4"/><path d="M3 5h4"/><path d="M3 9h4"/></svg>,
-  Upload: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>,
-  Copy: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>,
-  Image: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>,
-  Download: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>,
-  Expand: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/></svg>,
-  Shrink: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>,
-  Play: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>,
-  Check: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
-  Link: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
-  Send: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
-  Filter: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
-  Activity: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>,
-  Folder: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>,
-  Layout: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>,
-  Heart: ({ filled }: { filled?: boolean }) => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={filled ? "text-red-500" : ""}><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" /></svg>,
-  ChevronDown: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>,
-  Sparkles: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 3v4"/><path d="M3 5h4"/><path d="M3 9h4"/></svg>,
+  Layout: (props: any) => <IconWrapper {...props}><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="9" y1="21" x2="9" y2="9" /></IconWrapper>,
+  Plus: (props: any) => <IconWrapper {...props}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></IconWrapper>,
+  Heart: ({ filled, ...props }: any) => (
+    <IconWrapper {...props} fill={filled ? "currentColor" : "none"}>
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </IconWrapper>
+  ),
+  Trash: (props: any) => <IconWrapper {...props}><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></IconWrapper>,
+  X: (props: any) => <IconWrapper {...props}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></IconWrapper>,
+  ArrowLeft: (props: any) => <IconWrapper {...props}><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></IconWrapper>,
+  Box: (props: any) => <IconWrapper {...props}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></IconWrapper>,
+  Image: (props: any) => <IconWrapper {...props}><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></IconWrapper>,
+  FileText: (props: any) => <IconWrapper {...props}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></IconWrapper>,
+  LogOut: (props: any) => <IconWrapper {...props}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></IconWrapper>,
+  Menu: (props: any) => <IconWrapper {...props}><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" /></IconWrapper>,
+  Sliders: (props: any) => <IconWrapper {...props}><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></IconWrapper>,
+  Sparkles: (props: any) => <IconWrapper {...props}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /></IconWrapper>,
+  Upload: (props: any) => <IconWrapper {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></IconWrapper>,
+  Check: (props: any) => <IconWrapper {...props}><polyline points="20 6 9 17 4 12" /></IconWrapper>,
+  Edit: (props: any) => <IconWrapper {...props}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></IconWrapper>,
+  AlertTriangle: (props: any) => <IconWrapper {...props}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></IconWrapper>,
+  Zap: (props: any) => <IconWrapper {...props}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></IconWrapper>,
+  Quote: (props: any) => <IconWrapper {...props}><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z" /><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z" /></IconWrapper>,
+  Clock: (props: any) => <IconWrapper {...props}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></IconWrapper>,
+  ChevronRight: (props: any) => <IconWrapper {...props}><polyline points="9 18 15 12 9 6" /></IconWrapper>
 };
 
-// --- TYPES ---
-interface Prompt {
-  id: string;
-  title: string;
-  category: string;
-  version: string;
-  tags: string[];
-  content: string;
-  isFavorite?: boolean;
-  updatedAt?: Timestamp;
-  history?: any[];
-}
-
-interface Framework {
-  id: string;
-  title: string;
-  description: string;
-  category: string;
-  steps: string[];
-  tags: string[];
-  isFavorite?: boolean;
-  updatedAt?: Timestamp;
-}
-
-interface Asset {
-  id: string;
-  title?: string;
-  description?: string;
-  category: string;
-  collectionId?: string;
-  fileName: string;
-  fileUrl: string;
-  storagePath: string;
-  tags: string[];
-  isFavorite?: boolean;
-  userId: string;
-  createdAt?: Timestamp;
-}
-
-interface AssetCollection {
-  id: string;
-  title: string;
-  userId: string;
-  createdAt?: Timestamp;
-}
-
-interface NoteEntry {
-  id: string;
-  content: string;
-  createdAt: Timestamp;
-}
-
-interface Workflow {
-  id: string;
-  title: string;
-  goal: string;
-  promptId: string;
-  frameworkId: string;
-  category: string;
-  notes: string;
-  noteLog?: NoteEntry[];
-  stepNotes?: { [key: string]: string }; 
-  isFavorite?: boolean;
-  userId: string;
-  createdAt?: Timestamp;
-  completedSteps?: number[];
-}
-
-// --- HELPERS ---
-const formatDate = (timestamp: any) => {
-  if (!timestamp) return 'Just now';
-  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-  return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
-const toggleFavorite = async (collectionName: string, id: string, currentStatus?: boolean) => {
-    try {
-        await updateDoc(doc(db, collectionName, id), {
-            isFavorite: !currentStatus
-        });
-    } catch (e) {
-        console.error("Error toggling favorite", e);
-    }
-};
-
-// --- HOOKS ---
-const usePrompts = () => {
-  const [prompts, setPrompts] = useState<Prompt[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const q = query(collection(db, 'prompts'), orderBy('updatedAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const promptsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Prompt[];
-      setPrompts(promptsData);
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching prompts:", error);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  return { prompts, loading };
-};
-
-const useFrameworks = () => {
-  const [frameworks, setFrameworks] = useState<Framework[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const q = query(collection(db, 'frameworks'), orderBy('updatedAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const frameworksData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Framework[];
-      setFrameworks(frameworksData);
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching frameworks:", error);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  return { frameworks, loading };
-};
-
-const useAssets = () => {
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const q = query(collection(db, 'assets'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const assetsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Asset[];
-      setAssets(assetsData);
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching assets:", error);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  return { assets, loading };
-};
-
-const useAssetCollections = () => {
-  const [collections, setCollections] = useState<AssetCollection[]>([]);
-  const [loading, setLoading] = useState(true);
-  const { user } = useAuth();
-
-  useEffect(() => {
-    if (!user) return;
-    const q = query(collection(db, 'collections'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as AssetCollection[];
-      const myCollections = data.filter(c => c.userId === user.uid);
-      setCollections(myCollections);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, [user]);
-
-  return { collections, loading };
-};
-
-const useWorkflows = () => {
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const q = query(collection(db, 'workflows'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const workflowsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Workflow[];
-      setWorkflows(workflowsData);
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching workflows:", error);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  return { workflows, loading };
-};
-
-// --- GLOBAL AI ASSISTANT COMPONENT ---
-const GlobalAIAssistant = () => {
-  const { prompts } = usePrompts();
-  const { frameworks } = useFrameworks();
-  const { workflows } = useWorkflows();
-  const { assets } = useAssets();
+// --- Helper Functions ---
+const getCategoryColor = (category: string) => {
+  if (!category) return 'bg-slate-100 text-slate-800';
   
-  const [isOpen, setIsOpen] = useState(false);
-  const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<{role: 'user' | 'model', text: string}[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const colors: Record<string, string> = {
+    'Marketing': 'bg-blue-100 text-blue-800',
+    'Marketing & Strategy': 'bg-blue-100 text-blue-800',
+    'Development': 'bg-green-100 text-green-800',
+    'Development & Code': 'bg-green-100 text-green-800',
+    'Sales': 'bg-purple-100 text-purple-800',
+    'HR': 'bg-orange-100 text-orange-800',
+    'Design': 'bg-pink-100 text-pink-800',
+    'Design & UI/UX': 'bg-pink-100 text-pink-800',
+    'Lifestyle & Fashion': 'bg-rose-100 text-rose-800',
+    'Code': 'bg-slate-100 text-slate-800',
+    'Content': 'bg-yellow-100 text-yellow-800',
+    'Content Creation': 'bg-yellow-100 text-yellow-800',
+    'Data': 'bg-cyan-100 text-cyan-800',
+    'Productivity': 'bg-teal-100 text-teal-800',
+    'Productivity & Ops': 'bg-teal-100 text-teal-800',
+    'Strategy': 'bg-indigo-100 text-indigo-800',
+  };
+  return colors[category] || 'bg-slate-100 text-slate-800';
+};
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isOpen]);
+const toggleFavorite = async (collectionName: string, id: string, currentStatus: boolean) => {
+  try {
+    const ref = doc(db, collectionName, id);
+    await updateDoc(ref, { isFavorite: !currentStatus });
+  } catch (error) {
+    console.error("Error toggling favorite:", error);
+  }
+};
 
-  const handleSend = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!input.trim() || isLoading) return;
-
-    const userMessage = input;
-    setMessages(prev => [...prev, { role: 'user', text: userMessage }]);
-    setInput('');
-    setIsLoading(true);
-
-    try {
-      const contextSummary = {
-        prompts: prompts.map(p => ({ title: p.title, category: p.category, tags: p.tags, id: p.id })),
-        frameworks: frameworks.map(f => ({ title: f.title, description: f.description, steps: f.steps.length, id: f.id })),
-        assets: assets.map(a => ({ title: a.title, fileName: a.fileName, category: a.category, tags: a.tags })),
-        workflows: workflows.map(w => ({ title: w.title, goal: w.goal, category: w.category }))
+// --- AI Logic (Phase 2.2 Hybrid) ---
+async function analyzeImageWithGemini(file: File): Promise<{ title: string, description: string, category: string, tags: string[] }> {
+  try {
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve(base64);
       };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
 
-      const systemInstruction = `You are the AI Assistant for the 'Prompt & Process Vault' application.
-      You have read-access to the user's current library summary:
-      
-      - Prompts: ${JSON.stringify(contextSummary.prompts)}
-      - Frameworks: ${JSON.stringify(contextSummary.frameworks)}
-      - Assets: ${JSON.stringify(contextSummary.assets)}
-      - Workflows: ${JSON.stringify(contextSummary.workflows)}
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
+    // Updated Prompt for Hybrid Architecture
+    const promptText = `Analyze this image for a digital asset library. 
+    1. "category": Choose EXACTLY ONE from: ${JSON.stringify(ASSET_COLLECTIONS)}.
+    2. "title": A short professional title.
+    3. "description": A concise description.
+    4. "tags": A list of 3-5 free-form descriptive tags (e.g., "blue vest", "studio", "happy").`;
 
-      Your goal is to help the user find items, suggest ideas for new prompts/workflows based on what they have, or answer general questions.
-      Keep answers concise and helpful. If you suggest a Prompt ID or Framework ID, mention it clearly.`;
-
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      
-      const history = messages.map(m => ({
-        role: m.role,
-        parts: [{ text: m.text }]
-      }));
-
-      const chat = ai.chats.create({
-        model: "gemini-2.5-flash",
-        config: { systemInstruction: systemInstruction },
-        history: history
-      });
-
-      const result = await chat.sendMessageStream({ message: userMessage });
-      
-      let fullResponse = "";
-      setMessages(prev => [...prev, { role: 'model', text: "" }]);
-
-      for await (const chunk of result) {
-        const chunkText = chunk.text;
-        if (chunkText) {
-            fullResponse += chunkText;
-            setMessages(prev => {
-                const newArr = [...prev];
-                newArr[newArr.length - 1].text = fullResponse;
-                return newArr;
-            });
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: {
+        parts: [
+          { inlineData: { mimeType: file.type, data: base64Data } },
+          { text: promptText }
+        ]
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            description: { type: Type.STRING },
+            category: { type: Type.STRING },
+            tags: { type: Type.ARRAY, items: { type: Type.STRING } }
+          }
         }
       }
+    });
 
-    } catch (error) {
-      console.error("Gemini Error:", error);
-      setMessages(prev => [...prev, { role: 'model', text: "Sorry, I encountered an error connecting to Gemini. Please check your API key." }]);
-    } finally {
-      setIsLoading(false);
+    const text = response.text;
+    if (!text) throw new Error("No response from AI");
+    
+    const data = JSON.parse(text);
+    
+    // Validate category fallbacks
+    let category = data.category;
+    if (!ASSET_COLLECTIONS.includes(category)) {
+      category = 'Archives / Other';
     }
-  };
+
+    return { ...data, category };
+
+  } catch (error) {
+    console.error("AI Analysis failed:", error);
+    return {
+      title: file.name.split('.')[0],
+      description: "Auto-analysis unavailable.",
+      category: "Archives / Other",
+      tags: ["image"]
+    };
+  }
+}
+
+// --- Hooks ---
+const useCollection = (collectionName: string) => {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = collection(db, collectionName);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setData(items);
+      setLoading(false);
+    }, (error) => {
+      console.error(`Error fetching ${collectionName}:`, error);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, [collectionName]);
+
+  return { data, loading };
+};
+
+// --- Shared Components ---
+const Sidebar = ({ activeView, setActiveView, isMobileOpen, setIsMobileOpen, user, signOut }: any) => {
+  const navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: Icons.Layout },
+    { id: 'prompts', label: 'Prompts', icon: Icons.FileText },
+    { id: 'assets', label: 'Assets', icon: Icons.Image },
+    { id: 'frameworks', label: 'Frameworks', icon: Icons.Box },
+  ];
 
   return (
     <>
-      {!isOpen && (
-        <button 
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-full shadow-2xl flex items-center justify-center z-[100] transition-transform hover:scale-105 active:scale-95 group"
-        >
-          <div className="animate-pulse group-hover:animate-none"><Icons.Sparkles /></div>
-        </button>
+      {isMobileOpen && (
+        <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setIsMobileOpen(false)} />
       )}
-
-      {isOpen && (
-        <div className="fixed z-[100] flex flex-col shadow-2xl overflow-hidden
-          w-full h-full inset-0 md:inset-auto md:bottom-24 md:right-6 md:w-96 md:h-[600px] md:rounded-2xl bg-white border border-slate-200"
-        >
-          <div className="p-4 bg-slate-900 text-white flex justify-between items-center shrink-0">
-            <div className="flex items-center gap-2">
-               <div className="text-yellow-400"><Icons.Sparkles /></div>
-               <div>
-                  <h3 className="font-bold text-sm">Vault Assistant</h3>
-                  <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span>
-                    Online • Gemini 2.5
-                  </div>
-               </div>
-            </div>
-            <button onClick={() => setIsOpen(false)} className="p-1 hover:bg-white/10 rounded transition"><Icons.ChevronDown /></button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 custom-scrollbar">
-             {messages.length === 0 && (
-                <div className="text-center mt-10 space-y-3">
-                   <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-2"><Icons.Magic /></div>
-                   <p className="text-sm font-bold text-slate-700">How can I help you today?</p>
-                   <p className="text-xs text-slate-500 max-w-[200px] mx-auto">I have access to your {prompts.length} prompts, {frameworks.length} frameworks and {workflows.length} workflows.</p>
-                   
-                   <div className="grid grid-cols-1 gap-2 mt-4 px-4">
-                      <button onClick={() => { setInput("Find a prompt for coding python"); handleSend(); }} className="text-xs bg-white border border-slate-200 p-2 rounded hover:bg-blue-50 text-left text-slate-600 transition">"Find a prompt for coding..."</button>
-                      <button onClick={() => { setInput("Suggest a workflow for SEO blog posts"); handleSend(); }} className="text-xs bg-white border border-slate-200 p-2 rounded hover:bg-blue-50 text-left text-slate-600 transition">"Suggest a workflow for SEO..."</button>
-                   </div>
-                </div>
-             )}
-
-             {messages.map((msg, i) => (
-               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                    msg.role === 'user' 
-                      ? 'bg-blue-600 text-white rounded-br-none' 
-                      : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none shadow-sm'
-                  }`}>
-                    {msg.text ? <div className="whitespace-pre-wrap">{msg.text}</div> : (
-                      <div className="flex gap-1 h-5 items-center">
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-100"></span>
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-200"></span>
-                      </div>
-                    )}
-                  </div>
-               </div>
-             ))}
-             <div ref={chatEndRef} />
-          </div>
-
-          <form onSubmit={handleSend} className="p-3 bg-white border-t border-slate-100 flex gap-2 shrink-0">
-             <input 
-               type="text" 
-               className="flex-1 bg-slate-100 border-0 rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition outline-none text-slate-900 placeholder:text-slate-400"
-               placeholder="Ask Gemini..."
-               value={input}
-               onChange={e => setInput(e.target.value)}
-             />
-             <button 
-                type="submit" 
-                disabled={!input.trim() || isLoading}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white w-10 h-10 rounded-full flex items-center justify-center transition shadow-sm"
-             >
-               <Icons.Send />
-             </button>
-          </form>
+      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-slate-300 transform transition-transform duration-200 ease-in-out md:static md:translate-x-0 ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'} flex flex-col`}>
+        <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+          <h1 className="text-xl font-bold text-white tracking-wider">VAULT</h1>
+          <button onClick={() => setIsMobileOpen(false)} className="md:hidden"><Icons.X /></button>
         </div>
-      )}
+        <nav className="flex-1 p-4 space-y-2">
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              onClick={() => { setActiveView(item.id); setIsMobileOpen(false); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeView === item.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-800'}`}
+            >
+              <item.icon size={20} />
+              <span className="font-medium">{item.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="p-4 border-t border-slate-800">
+          <div className="mb-4 px-2">
+             <p className="text-xs text-slate-500 uppercase font-bold mb-1">User</p>
+             <p className="text-sm text-white truncate">{user?.email}</p>
+          </div>
+          <button onClick={signOut} className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-slate-800 rounded-lg transition">
+            <Icons.LogOut size={16} /> Sign Out
+          </button>
+        </div>
+      </div>
     </>
   );
 };
 
-// --- REUSABLE COMPONENTS ---
-
-const TagInput = ({ tags, onChange }: { tags: string[], onChange: (tags: string[]) => void }) => {
-  const [input, setInput] = useState('');
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      const val = input.trim().toLowerCase();
-      if (val && !tags.includes(val)) {
-        onChange([...tags, val]);
-      }
-      setInput('');
-    }
-  };
-
-  const removeTag = (tagToRemove: string) => {
-    onChange(tags.filter(t => t !== tagToRemove));
-  };
+const FilterSidebar = ({ title, activeGroup, setActiveGroup, isMobileOpen, onCloseMobile, categories }: any) => {
+  const defaultCategories = ['All', 'Favorites', ...UNIVERSAL_TAGS];
+  const list = categories || defaultCategories;
 
   return (
-    <div className="flex flex-wrap gap-2 p-2 border border-slate-300 rounded-lg bg-white focus-within:ring-2 focus-within:ring-blue-500">
-      {tags.map(tag => (
-        <span key={tag} className="bg-slate-100 text-slate-700 px-2 py-1 rounded-md text-sm flex items-center gap-1">
-          #{tag}
-          <button type="button" onClick={() => removeTag(tag)} className="text-slate-400 hover:text-red-500 hover:bg-slate-200 rounded-full"><Icons.MinusCircle /></button>
-        </span>
-      ))}
-      <input 
-        type="text" 
-        className="flex-1 outline-none text-sm min-w-[80px] bg-transparent text-slate-900" 
-        placeholder="Type tag & enter..." 
-        value={input} 
-        onChange={e => setInput(e.target.value)} 
-        onKeyDown={handleKeyDown} 
-      />
-    </div>
-  );
-};
-
-const CategorySelect = ({ value, onChange }: { value: string, onChange: (v: string) => void }) => (
-    <select required className={INPUT_CLASSES} value={value} onChange={e => onChange(e.target.value)}>
-        <option value="General">General (Default)</option>
-        {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-    </select>
-);
-
-const CollectionSelect = ({ value, onChange, collections }: { value: string, onChange: (v: string) => void, collections: AssetCollection[] }) => (
-    <select className={INPUT_CLASSES} value={value} onChange={e => onChange(e.target.value)}>
-        <option value="">No Collection</option>
-        {collections.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-    </select>
-);
-
-const GlobalFilterSidebar = ({ 
-    title,
-    activeGroup, 
-    setActiveGroup, 
-    collections = [], 
-    onCreateCollection, 
-    isMobileOpen, 
-    onCloseMobile,
-    showCollections = false
-}: any) => {
-    const baseClasses = "fixed inset-y-0 left-0 w-64 bg-slate-50 border-r border-slate-200 z-50 transform transition-transform duration-300 ease-in-out md:translate-x-0 md:static md:w-60 lg:w-64 shrink-0 flex flex-col";
-    const mobileClasses = isMobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full";
-
-    return (
-        <>
-        {isMobileOpen && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={onCloseMobile}></div>}
-        <div className={`${baseClasses} ${mobileClasses}`}>
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center md:hidden">
-                <h3 className="font-bold text-slate-800">Filters & Folders</h3>
-                <button onClick={onCloseMobile} className="text-slate-500"><Icons.X /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-6">
-                <div>
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-2 tracking-wider">{title}</h4>
-                    <button onClick={() => { setActiveGroup('All'); onCloseMobile(); }} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition mb-1 ${activeGroup === 'All' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:bg-slate-100'}`}><Icons.Layout /> All Items</button>
-                    <button onClick={() => { setActiveGroup('Favorites'); onCloseMobile(); }} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeGroup === 'Favorites' ? 'bg-red-50 text-red-600' : 'text-slate-600 hover:bg-slate-100'}`}><Icons.Heart /> Favorites</button>
-                </div>
-                <div>
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-2 tracking-wider">Categories</h4>
-                    <div className="space-y-1">
-                        {CATEGORIES.map(cat => (
-                            <button key={cat.id} onClick={() => { setActiveGroup(cat.id); onCloseMobile(); }} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition ${activeGroup === cat.id ? 'bg-white border border-slate-200 shadow-sm font-bold text-slate-800' : 'text-slate-600 hover:bg-slate-100 font-medium'}`}>
-                                <span className={`w-2 h-2 rounded-full ${cat.color.split(' ')[0]}`}></span>
-                                {cat.label.split(' ')[1] + ' ' + (cat.label.split(' ')[2] || '')}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-                {showCollections && onCreateCollection && (
-                    <div>
-                        <div className="flex justify-between items-center mb-2">
-                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Collections</h4>
-                            <button onClick={onCreateCollection} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 p-1 rounded transition"><Icons.Plus /></button>
-                        </div>
-                        {collections.length === 0 ? <div className="text-xs text-slate-400 italic px-2">No collections yet.</div> : (
-                            <div className="space-y-1">
-                                {collections.map((col: any) => (
-                                    <button key={col.id} onClick={() => { setActiveGroup(col.id); onCloseMobile(); }} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition ${activeGroup === col.id ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-100 font-medium'}`}><Icons.Folder /><span className="truncate">{col.title}</span></button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
+    <>
+      {isMobileOpen && (
+        <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={onCloseMobile} />
+      )}
+      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 transform transition-transform duration-200 ease-in-out md:static md:translate-x-0 ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'} flex flex-col`}>
+        <div className="p-4 border-b border-slate-100 flex justify-between items-center h-[73px]">
+           <h2 className="font-bold text-slate-800 text-lg">{title}</h2>
+           <button onClick={onCloseMobile} className="md:hidden text-slate-500"><Icons.X size={20} /></button>
         </div>
-        </>
-    );
-};
-
-// --- MODALS (Code retained from previous step but compressed for length) ---
-const HealthCheckModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
-  const [logs, setLogs] = useState<{msg: string, type: 'info' | 'success' | 'error'}[]>([]);
-  const [running, setRunning] = useState(false);
-  useEffect(() => { if (isOpen) runDiagnostics(); }, [isOpen]);
-  const addLog = (msg: string, type: 'info' | 'success' | 'error') => setLogs(prev => [...prev, { msg, type }]);
-  const runDiagnostics = async () => {
-    setRunning(true); setLogs([]); addLog('Starting System Diagnostics...', 'info');
-    const user = auth.currentUser;
-    if (!user) { addLog('Auth Error: No active user session.', 'error'); setRunning(false); return; }
-    addLog(`Auth Verified: ${user.email}`, 'success');
-    try {
-      addLog('Testing Firestore Write...', 'info');
-      const docRef = await addDoc(collection(db, '_diagnostics'), { timestamp: serverTimestamp(), user: user.uid });
-      addLog(`Firestore Write Success. Doc ID: ${docRef.id}`, 'success');
-      addLog('Testing Firestore Delete...', 'info');
-      await deleteDoc(doc(db, '_diagnostics', docRef.id));
-      addLog('Firestore Delete Success.', 'success');
-    } catch (e: any) { addLog(`Firestore Failed: ${e.message}`, 'error'); setRunning(false); return; }
-    addLog('Diagnostics Complete.', 'success'); setRunning(false);
-  };
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-slate-900 rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-700">
-        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800"><h3 className="text-lg font-bold text-white flex items-center gap-2"><Icons.Activity /> System Diagnostics</h3><button onClick={onClose} className="text-slate-400 hover:text-white"><Icons.X /></button></div>
-        <div className="p-4 h-64 overflow-y-auto font-mono text-xs space-y-2 bg-slate-950">{logs.map((log, i) => <div key={i} className={`flex gap-2 ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-blue-300'}`}><span>[{new Date().toLocaleTimeString()}]</span><span>{log.msg}</span></div>)}{running && <div className="text-slate-500 animate-pulse">Running tests...</div>}</div>
-      </div>
-    </div>
-  );
-};
-
-const CreatePromptModal = ({ isOpen, onClose }: any) => {
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({ title: '', category: 'Coding', content: '' });
-  const [tags, setTags] = useState<string[]>([]);
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); setLoading(true);
-    try {
-      await addDoc(collection(db, 'prompts'), { ...formData, tags, version: 'v1.0', userId: user?.uid, updatedAt: serverTimestamp(), createdAt: serverTimestamp(), history: [], isFavorite: false });
-      setFormData({ title: '', category: 'Coding', content: '' }); setTags([]); onClose();
-    } catch (error) { console.error(error); alert("Error saving prompt."); } finally { setLoading(false); }
-  };
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="text-lg font-bold text-slate-800">New Prompt</h3><button onClick={onClose} className="text-slate-400 hover:text-slate-600"><Icons.X /></button></div>
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Title</label><input required className={INPUT_CLASSES} value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} /></div><div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Category</label><CategorySelect value={formData.category} onChange={v => setFormData({...formData, category: v})} /></div></div>
-          <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tags</label><TagInput tags={tags} onChange={setTags} /></div>
-          <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Content</label><textarea required rows={8} className={INPUT_CLASSES} value={formData.content} onChange={e => setFormData({...formData, content: e.target.value})} /></div>
-        </form>
-        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2"><button onClick={onClose} className="px-4 py-2 text-slate-600 text-sm font-medium hover:bg-slate-200 rounded-lg">Cancel</button><button onClick={handleSubmit} disabled={loading} className="px-6 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700">{loading ? 'Saving...' : 'Save Prompt'}</button></div>
-      </div>
-    </div>
-  );
-};
-
-const CreateFrameworkModal = ({ isOpen, onClose }: any) => {
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({ title: '', category: 'Productivity', description: '' });
-  const [tags, setTags] = useState<string[]>([]);
-  const [steps, setSteps] = useState<string[]>(['']);
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); setLoading(true);
-    try {
-      await addDoc(collection(db, 'frameworks'), { ...formData, steps: steps.filter(s=>s.trim()), tags, userId: user?.uid, updatedAt: serverTimestamp(), createdAt: serverTimestamp(), isFavorite: false });
-      setFormData({ title: '', description: '', category: 'Productivity' }); setTags([]); setSteps(['']); onClose();
-    } catch (error) { console.error(error); alert("Error saving framework."); } finally { setLoading(false); }
-  };
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="text-lg font-bold text-slate-800">New Framework</h3><button onClick={onClose} className="text-slate-400 hover:text-slate-600"><Icons.X /></button></div>
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Name</label><input required className={INPUT_CLASSES} value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} /></div><div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Category</label><CategorySelect value={formData.category} onChange={v => setFormData({...formData, category: v})} /></div></div>
-          <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Description</label><textarea required rows={2} className={INPUT_CLASSES} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tags</label><TagInput tags={tags} onChange={setTags} /></div>
-          <div><label className="block text-xs font-bold text-slate-500 uppercase mb-2">Steps</label><div className="space-y-2">{steps.map((step, index) => (<div key={index} className="flex gap-2"><span className="text-slate-400 font-mono text-xs w-4">{index + 1}.</span><input required className={INPUT_CLASSES} value={step} onChange={(e) => { const newSteps = [...steps]; newSteps[index] = e.target.value; setSteps(newSteps); }} />{steps.length > 1 && <button type="button" onClick={() => setSteps(steps.filter((_, i) => i !== index))} className="text-slate-400 hover:text-red-500"><Icons.MinusCircle /></button>}</div>))}</div><button type="button" onClick={() => setSteps([...steps, ''])} className="mt-3 text-blue-600 text-sm font-bold flex gap-1"><Icons.Plus /> Add Step</button></div>
-        </form>
-        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2"><button onClick={onClose} className="px-4 py-2 text-slate-600">Cancel</button><button onClick={handleSubmit} disabled={loading} className="px-6 py-2 bg-blue-600 text-white rounded-lg">{loading ? 'Saving...' : 'Save Framework'}</button></div>
-      </div>
-    </div>
-  );
-};
-
-const UploadAssetModal = ({ isOpen, onClose }: any) => {
-    const { user } = useAuth();
-    const { collections } = useAssetCollections();
-    const [loading, setLoading] = useState(false);
-    const [file, setFile] = useState<File | null>(null);
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-    const [tags, setTags] = useState<string[]>([]);
-    const [title, setTitle] = useState('');
-    const [description, setDescription] = useState('');
-    const [category, setCategory] = useState('Image');
-    const [collectionId, setCollectionId] = useState('');
-
-    useEffect(() => { if (!file) { setPreviewUrl(null); return; } const o = URL.createObjectURL(file); setPreviewUrl(o); return () => URL.revokeObjectURL(o); }, [file]);
-    const handleUpload = async (e: React.FormEvent) => { e.preventDefault(); if (!file || !user) return; setLoading(true); try { const path = `assets/${user.uid}/${Date.now()}_${file.name}`; const r = ref(storage, path); await uploadBytes(r, file); const url = await getDownloadURL(r); await addDoc(collection(db, 'assets'), { fileName: file.name, title: title || file.name, description, category, collectionId: collectionId || null, fileUrl: url, storagePath: path, tags, userId: user.uid, createdAt: serverTimestamp(), isFavorite: false }); setFile(null); setTags([]); setTitle(''); setDescription(''); onClose(); } catch (e) { console.error(e); alert("Failed to upload."); } finally { setLoading(false); } };
-
-    if (!isOpen) return null;
-    return (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="text-lg font-bold text-slate-800">Upload Asset</h3><button onClick={onClose} className="text-slate-400 hover:text-slate-600"><Icons.X /></button></div>
-                <form onSubmit={handleUpload} className="p-6 space-y-4 overflow-y-auto">
-                    <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl p-8 bg-slate-50 relative"><input type="file" accept="image/*" onChange={e => { if (e.target.files?.[0]) { setFile(e.target.files[0]); setTitle(e.target.files[0].name); } }} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />{previewUrl ? <img src={previewUrl} className="h-48 object-contain" /> : <div className="text-center"><Icons.Upload /><p className="text-sm mt-2">Select Image</p></div>}</div>
-                    {file && <div className="space-y-4 pt-2"><div><label className="block text-xs font-bold text-slate-500 mb-1">Title</label><input className={INPUT_CLASSES} value={title} onChange={e => setTitle(e.target.value)} /></div><div className="grid grid-cols-2 gap-4"><CategorySelect value={category} onChange={setCategory} /><CollectionSelect value={collectionId} onChange={setCollectionId} collections={collections} /></div><div><label className="block text-xs font-bold text-slate-500 mb-1">Description</label><textarea className={INPUT_CLASSES} value={description} onChange={e => setDescription(e.target.value)} /></div><TagInput tags={tags} onChange={setTags} /></div>}
-                    <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={onClose} className="px-4 py-2 text-slate-600">Cancel</button><button type="submit" disabled={!file || loading} className="px-6 py-2 bg-blue-600 text-white rounded-lg">{loading ? 'Uploading...' : 'Upload'}</button></div>
-                </form>
-            </div>
+        <div className="p-4 space-y-1 overflow-y-auto flex-1 custom-scrollbar">
+           {list.map((cat: string) => (
+              <button
+                 key={cat}
+                 onClick={() => { setActiveGroup(cat); onCloseMobile(); }}
+                 className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors flex justify-between items-center ${activeGroup === cat ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'}`}
+              >
+                 {cat}
+              </button>
+           ))}
         </div>
-    );
-};
-
-const CreateWorkflowModal = ({ isOpen, onClose }: any) => {
-  const { user } = useAuth();
-  const { prompts } = usePrompts();
-  const { frameworks } = useFrameworks();
-  const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({ title: '', goal: '', promptId: '', frameworkId: '', notes: '' });
-  const handleSubmit = async (e: React.FormEvent) => { e.preventDefault(); setLoading(true); const cat = prompts.find(p => p.id === formData.promptId)?.category || 'General'; try { await addDoc(collection(db, 'workflows'), { ...formData, category: cat, userId: user?.uid, createdAt: serverTimestamp(), isFavorite: false }); setFormData({ title: '', goal: '', promptId: '', frameworkId: '', notes: '' }); onClose(); } catch (e) { console.error(e); } finally { setLoading(false); } };
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="text-lg font-bold text-slate-800">New Workflow</h3><button onClick={onClose} className="text-slate-400 hover:text-slate-600"><Icons.X /></button></div>
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
-          <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Title</label><input required className={INPUT_CLASSES} value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Goal</label><input required className={INPUT_CLASSES} value={formData.goal} onChange={e => setFormData({...formData, goal: e.target.value})} /></div>
-          <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-blue-600 mb-1">Prompt</label><select required className={INPUT_CLASSES} value={formData.promptId} onChange={e => setFormData({...formData, promptId: e.target.value})}><option value="">Select Prompt</option>{prompts.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></div><div><label className="block text-xs font-bold text-indigo-600 mb-1">Framework</label><select required className={INPUT_CLASSES} value={formData.frameworkId} onChange={e => setFormData({...formData, frameworkId: e.target.value})}><option value="">Select Framework</option>{frameworks.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}</select></div></div>
-          <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notes</label><textarea className={INPUT_CLASSES} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} /></div>
-        </form>
-        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2"><button onClick={onClose} className="px-4 py-2 text-slate-600">Cancel</button><button onClick={handleSubmit} disabled={loading} className="px-6 py-2 bg-blue-600 text-white rounded-lg">{loading ? 'Saving...' : 'Create'}</button></div>
       </div>
-    </div>
+    </>
   );
 };
-
-const ImageLightbox = ({ asset, onClose }: { asset: Asset, onClose: () => void }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
-    if (!asset) return null;
-    const handleDownload = async (url: string, filename: string) => { try { const r = await fetch(url, { mode: 'cors' }); const b = await r.blob(); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); } catch (e) { window.open(url, '_blank'); } };
-    return (
-        <div className="fixed inset-0 bg-black z-[70] flex flex-col backdrop-blur-sm" onClick={onClose}>
-            <div className="absolute top-4 right-4 z-50 flex gap-3"><button onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }} className="p-3 text-white/70 hover:text-white bg-black/40 rounded-full">{isExpanded ? <Icons.Shrink /> : <Icons.Expand />}</button><button onClick={onClose} className="p-3 text-white/70 hover:text-white bg-black/40 rounded-full"><Icons.X /></button></div>
-            <div className={`flex-1 w-full h-full flex ${isExpanded ? '' : 'flex-col lg:flex-row'} overflow-hidden`} onClick={(e) => e.stopPropagation()}>
-                 <div className={`relative flex items-center justify-center bg-black/50 transition-all duration-300 ${isExpanded ? 'w-full h-full' : 'w-full h-[45vh] lg:h-full lg:flex-1'}`}><img src={asset.fileUrl} alt={asset.title} className="max-w-full max-h-full w-auto h-auto object-contain" /></div>
-                 {!isExpanded && (
-                     <div className="w-full lg:w-96 bg-slate-900 border-t lg:border-l border-white/10 flex flex-col h-auto flex-1 lg:h-full overflow-hidden shadow-2xl z-20">
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar"><div className="flex justify-between items-start"><h3 className="text-xl font-bold text-white">{asset.title}</h3><button onClick={() => toggleFavorite('assets', asset.id, asset.isFavorite)} className="text-white/50 hover:text-red-500"><Icons.Heart filled={asset.isFavorite} /></button></div><div className="bg-slate-800/50 rounded-lg p-4"><p className="text-slate-300 text-sm">{asset.description || "No description."}</p></div></div>
-                        <div className="p-4 bg-slate-950 border-t border-white/10"><button onClick={() => handleDownload(asset.fileUrl, asset.fileName)} className="w-full bg-white text-slate-900 py-3 rounded-lg font-bold flex justify-center gap-2"><Icons.Download /> Download</button></div>
-                     </div>
-                 )}
-            </div>
-        </div>
-    );
-};
-
-// --- VIEWS ---
 
 const LoginView = () => {
-  const [isLogin, setIsLogin] = useState(true);
+  const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { signIn, signUp } = useAuth();
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     try {
-      if (isLogin) {
-        await signIn(email, password);
-      } else {
-        await signUp(email, password);
-      }
+      await signIn(email, password);
     } catch (err: any) {
-      setError(err.message);
+      setError('Failed to sign in. Check your credentials.');
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
-      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
-        <h1 className="text-3xl font-bold text-slate-900 mb-2">{isLogin ? 'Welcome Back' : 'Create Account'}</h1>
-        <p className="text-slate-500 mb-6">Prompt & Process Vault</p>
-        
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
+        <h1 className="text-3xl font-bold text-slate-900 mb-2 text-center">Vault Access</h1>
+        <p className="text-slate-500 text-center mb-8">Enter your credentials to continue</p>
         {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm">{error}</div>}
-        
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
             <input 
               type="email" 
-              required 
-              className={INPUT_CLASSES}
               value={email}
               onChange={e => setEmail(e.target.value)}
+              className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+              placeholder="admin@vault.com"
+              required
             />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
             <input 
               type="password" 
-              required 
-              className={INPUT_CLASSES}
               value={password}
               onChange={e => setPassword(e.target.value)}
+              className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+              placeholder="••••••••"
+              required
             />
           </div>
-          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition">
-            {isLogin ? 'Sign In' : 'Sign Up'}
+          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-blue-200">
+            Secure Login
           </button>
         </form>
-        
-        <div className="mt-6 text-center text-sm text-slate-600">
-          {isLogin ? "Don't have an account? " : "Already have an account? "}
-          <button onClick={() => setIsLogin(!isLogin)} className="text-blue-600 font-bold hover:underline">
-            {isLogin ? 'Sign Up' : 'Log In'}
-          </button>
-        </div>
       </div>
     </div>
   );
 };
 
-const Sidebar = ({ view, setView, user, signOut, isOpen, closeMenu, onRunDiagnostics }: any) => {
-  const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: Icons.Dashboard },
-    { id: 'prompts', label: 'Prompts', icon: Icons.Prompts },
-    { id: 'frameworks', label: 'Frameworks', icon: Icons.Frameworks },
-    { id: 'assets', label: 'Assets', icon: Icons.Assets },
-    { id: 'workflows', label: 'Workflows', icon: Icons.Workflows },
-  ];
+const DashboardView = ({ setActiveView, setIsMobileOpen, setTargetId, user }: any) => {
+  const prompts = useCollection('prompts');
+  const assets = useCollection('assets');
+  const frameworks = useCollection('frameworks');
+  
+  const [quote, setQuote] = useState({ text: "", author: "" });
+
+  useEffect(() => {
+    const quotes = [
+      { text: "Simplicity is the ultimate sophistication.", author: "Leonardo da Vinci" },
+      { text: "Design is not just what it looks like, it's how it works.", author: "Steve Jobs" },
+      { text: "Good design is obvious. Great design is transparent.", author: "Joe Sparano" },
+      { text: "Creativity is intelligence having fun.", author: "Albert Einstein" },
+      { text: "Digital design is like painting, except the paint never dries.", author: "Neville Brody" }
+    ];
+    setQuote(quotes[Math.floor(Math.random() * quotes.length)]);
+  }, []);
+
+  const getRecent = (list: any[]) => {
+    // Sort locally to avoid complex Firestore indexing requirements right now (Ghost Safety)
+    return [...list].sort((a, b) => {
+       const tA = a.createdAt?.seconds || 0;
+       const tB = b.createdAt?.seconds || 0;
+       return tB - tA;
+    }).slice(0, 5);
+  };
+
+  const recentAssets = getRecent(assets.data);
+  const recentPrompts = getRecent(prompts.data);
+  const recentFrameworks = getRecent(frameworks.data);
+
+  const QuickAction = ({ label, icon: Icon, color, onClick }: any) => (
+    <button 
+      onClick={onClick}
+      className={`relative overflow-hidden rounded-xl p-4 flex items-center gap-3 transition hover:scale-105 shadow-sm hover:shadow-md bg-white border border-slate-100 group`}
+    >
+      <div className={`absolute inset-0 opacity-0 group-hover:opacity-5 transition bg-gradient-to-r ${color}`}></div>
+      <div className={`p-2 rounded-lg bg-slate-50 text-slate-700 group-hover:text-white group-hover:bg-gradient-to-br ${color} transition-colors`}>
+        <Icon size={20} />
+      </div>
+      <span className="font-bold text-slate-700 text-sm">{label}</span>
+    </button>
+  );
 
   return (
-    <>
-      {isOpen && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={closeMenu}></div>}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white transform transition-transform duration-300 ease-in-out md:translate-x-0 md:static shrink-0 flex flex-col ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-          <div className="font-bold text-xl tracking-tight">Vault<span className="text-blue-500">.AI</span></div>
-          <button onClick={closeMenu} className="md:hidden text-slate-400 hover:text-white"><Icons.X /></button>
+    <div className="flex flex-col h-full bg-slate-50 overflow-y-auto">
+      {/* 1. HERO SECTION (Fixed padding top) */}
+      <div className="bg-slate-900 text-white p-6 md:p-10 pt-24 pb-10 relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-10 opacity-10 transform translate-x-10 -translate-y-10">
+           <Icons.Box size={200} />
         </div>
         
-        <nav className="flex-1 p-4 space-y-1">
-          {menuItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => { setView(item.id); closeMenu(); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${view === item.id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
-            >
-              <item.icon />
-              <span className="font-medium">{item.label}</span>
+        <header className="flex items-center gap-3 mb-6 md:hidden relative z-10">
+            <button onClick={() => setIsMobileOpen(true)} className="p-2 bg-white/10 rounded-lg text-white">
+               <Icons.Menu size={20} />
             </button>
-          ))}
-        </nav>
+            <h2 className="text-xl font-bold">Dashboard</h2>
+        </header>
 
-        <div className="p-4 border-t border-slate-800 bg-slate-950">
-          <div className="flex items-center gap-3 mb-4 px-2">
-            <div className="w-8 h-8 rounded-full bg-blue-900 flex items-center justify-center text-xs font-bold">
-              {user?.email?.[0].toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium truncate">{user?.email}</div>
-              <div className="text-xs text-slate-500">Free Plan</div>
-            </div>
+        <div className="relative z-10 max-w-4xl">
+          <h1 className="text-3xl md:text-4xl font-bold mb-2">Hello, {user?.email?.split('@')[0]} 👋</h1>
+          <div className="flex items-start gap-2 text-slate-400 max-w-xl">
+             <Icons.Quote size={16} className="mt-1 flex-shrink-0 opacity-50" />
+             <p className="italic text-sm md:text-base">{quote.text} — <span className="text-slate-500 not-italic">{quote.author}</span></p>
           </div>
-          <button onClick={onRunDiagnostics} className="w-full flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 px-2 py-1 mb-2">
-            <Icons.Activity /> System Status
-          </button>
-          <button onClick={signOut} className="w-full flex items-center gap-2 text-slate-400 hover:text-white px-2 py-2 rounded hover:bg-slate-800 transition text-sm">
-            <Icons.LogOut /> Sign Out
-          </button>
         </div>
-      </aside>
-    </>
-  );
-};
-
-const MobileHeader = ({ onMenuClick }: { onMenuClick: () => void }) => (
-  <div className="md:hidden bg-white border-b border-slate-200 p-4 flex justify-between items-center z-30 sticky top-0">
-    <div className="font-bold text-xl">Vault<span className="text-blue-600">.AI</span></div>
-    <button onClick={onMenuClick} className="text-slate-600 p-1 rounded hover:bg-slate-100"><Icons.Menu /></button>
-  </div>
-);
-
-const StatCard = ({ label, count, icon: Icon, color }: any) => (
-  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${color}`}>
-      <Icon />
-    </div>
-    <div>
-      <div className="text-2xl font-bold text-slate-900">{count}</div>
-      <div className="text-sm text-slate-500">{label}</div>
-    </div>
-  </div>
-);
-
-const DashboardView = ({ setView, setSelectedPromptId }: any) => {
-  const { prompts } = usePrompts();
-  const { frameworks } = useFrameworks();
-  const { assets } = useAssets();
-  const { workflows } = useWorkflows();
-
-  return (
-    <div className="flex-1 h-full overflow-y-auto bg-slate-50 p-4 md:p-8">
-      <header className="mb-8">
-        <h2 className="text-2xl font-bold text-slate-900">Dashboard</h2>
-        <p className="text-slate-500">Overview of your creative vault.</p>
-      </header>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Prompts" count={prompts.length} icon={Icons.Prompts} color="bg-blue-100 text-blue-600" />
-        <StatCard label="Frameworks" count={frameworks.length} icon={Icons.Frameworks} color="bg-purple-100 text-purple-600" />
-        <StatCard label="Assets" count={assets.length} icon={Icons.Assets} color="bg-green-100 text-green-600" />
-        <StatCard label="Workflows" count={workflows.length} icon={Icons.Workflows} color="bg-amber-100 text-amber-600" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-slate-800">Recent Prompts</h3>
-            <button onClick={() => setView('prompts')} className="text-sm text-blue-600 hover:underline">View All</button>
-          </div>
-          <div className="space-y-3">
-            {prompts.slice(0, 5).map(p => (
-              <div key={p.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-lg cursor-pointer border border-transparent hover:border-slate-100 transition" onClick={() => { setView('prompts'); setSelectedPromptId(p.id); }}>
-                <div className="flex items-center gap-3">
-                  <span className={`w-2 h-2 rounded-full ${getCategoryColor(p.category).split(' ')[0]}`}></span>
-                  <span className="font-medium text-slate-700">{p.title}</span>
-                </div>
-                <span className="text-xs text-slate-400">{formatDate(p.updatedAt)}</span>
+      <div className="flex-1 px-4 md:px-8 mt-6 pb-10 space-y-8 max-w-7xl mx-auto w-full">
+        
+        {/* 5. QUICK ACTIONS (Moved to top) */}
+        <div>
+           {/* Removed label to keep it clean at the top, or keep it if preferred? Let's keep it minimal for top position */}
+           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <QuickAction label="New Prompt" icon={Icons.FileText} color="from-blue-500 to-indigo-500" onClick={() => setActiveView('prompts')} />
+              <QuickAction label="Upload Asset" icon={Icons.Upload} color="from-purple-500 to-pink-500" onClick={() => setActiveView('assets')} />
+              <QuickAction label="New Framework" icon={Icons.Box} color="from-emerald-500 to-teal-500" onClick={() => setActiveView('frameworks')} />
+              <QuickAction 
+                 label="Magic Analysis" 
+                 icon={Icons.Sparkles} 
+                 color="from-amber-400 to-orange-500" 
+                 onClick={() => { setTargetId('MAGIC_UPLOAD'); setActiveView('assets'); }} 
+              />
+           </div>
+        </div>
+
+        {/* 2. STATS BAR (Slim) */}
+        <div className="bg-white rounded-xl shadow-lg shadow-slate-200/50 p-4 flex flex-wrap justify-around items-center border border-slate-100 gap-4">
+             <div className="flex items-center gap-3 px-4">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Icons.FileText size={20}/></div>
+                <div><p className="text-xs text-slate-400 font-bold uppercase">Prompts</p><p className="text-xl font-bold text-slate-800">{prompts.loading ? '-' : prompts.data.length}</p></div>
+             </div>
+             <div className="w-px h-8 bg-slate-100 hidden md:block"></div>
+             <div className="flex items-center gap-3 px-4">
+                <div className="p-2 bg-purple-50 text-purple-600 rounded-lg"><Icons.Image size={20}/></div>
+                <div><p className="text-xs text-slate-400 font-bold uppercase">Assets</p><p className="text-xl font-bold text-slate-800">{assets.loading ? '-' : assets.data.length}</p></div>
+             </div>
+             <div className="w-px h-8 bg-slate-100 hidden md:block"></div>
+             <div className="flex items-center gap-3 px-4">
+                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><Icons.Box size={20}/></div>
+                <div><p className="text-xs text-slate-400 font-bold uppercase">Frameworks</p><p className="text-xl font-bold text-slate-800">{frameworks.loading ? '-' : frameworks.data.length}</p></div>
+             </div>
+        </div>
+
+        {/* 3. RECENT ASSETS (Filmstrip) */}
+        <div>
+           <div className="flex justify-between items-end mb-4">
+              <h3 className="text-lg font-bold text-slate-800">Recent Inspiration</h3>
+              <button onClick={() => setActiveView('assets')} className="text-sm text-blue-600 font-medium hover:underline flex items-center gap-1">View Gallery <Icons.ChevronRight size={14}/></button>
+           </div>
+           
+           {assets.loading ? (
+             <div className="h-40 bg-slate-200 rounded-xl animate-pulse"></div>
+           ) : recentAssets.length === 0 ? (
+             <div className="bg-white border-2 border-dashed border-slate-200 rounded-xl p-8 text-center text-slate-400">
+                <Icons.Image size={32} className="mx-auto mb-2 opacity-50" />
+                <p>No assets yet. Upload your first one!</p>
+             </div>
+           ) : (
+             <div className="flex gap-4 overflow-x-auto pb-4 snap-x">
+               {recentAssets.map(asset => (
+                 <div 
+                   key={asset.id} 
+                   onClick={() => { setTargetId(asset.id); setActiveView('assets'); }}
+                   className="snap-start flex-shrink-0 w-48 aspect-square relative rounded-xl overflow-hidden cursor-pointer group shadow-sm hover:shadow-md transition-all border border-slate-200"
+                 >
+                    {asset.url ? (
+                       <img 
+                         src={asset.url} 
+                         className="w-full h-full object-cover transition duration-500 group-hover:scale-110" 
+                         onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                            e.currentTarget.parentElement?.querySelector('.fallback')?.classList.remove('hidden');
+                         }}
+                       />
+                    ) : (
+                       <div className="w-full h-full bg-slate-100"></div>
+                    )}
+                    <div className="fallback hidden absolute inset-0 bg-slate-100 flex items-center justify-center text-slate-300">
+                       <Icons.Image size={32} />
+                    </div>
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3 pt-8">
+                       <p className="text-white text-sm font-bold truncate">{asset.title}</p>
+                       <p className="text-white/70 text-xs truncate">{asset.category}</p>
+                    </div>
+                 </div>
+               ))}
+               {/* Quick Add Card */}
+               <button 
+                 onClick={() => setActiveView('assets')}
+                 className="flex-shrink-0 w-32 aspect-square rounded-xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 hover:text-blue-500 hover:border-blue-300 hover:bg-blue-50 transition"
+               >
+                 <Icons.Plus size={24} />
+                 <span className="text-xs font-bold mt-2">Add New</span>
+               </button>
+             </div>
+           )}
+        </div>
+
+        {/* 4. GRID: Prompts & Frameworks */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+           {/* Recent Prompts */}
+           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                 <h3 className="font-bold text-slate-800 flex items-center gap-2"><Icons.FileText size={18} className="text-blue-500"/> Latest Prompts</h3>
+                 <button onClick={() => setActiveView('prompts')} className="text-xs font-bold text-slate-400 hover:text-slate-600">VIEW ALL</button>
               </div>
-            ))}
-            {prompts.length === 0 && <div className="text-slate-400 text-sm italic">No prompts yet.</div>}
-          </div>
+              <div className="space-y-3">
+                 {recentPrompts.length === 0 && <p className="text-sm text-slate-400 italic">No prompts created yet.</p>}
+                 {recentPrompts.map(p => (
+                    <div 
+                      key={p.id} 
+                      onClick={() => { setTargetId(p.id); setActiveView('prompts'); }}
+                      className="p-3 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition cursor-pointer group"
+                    >
+                       <div className="flex justify-between items-start">
+                          <h4 className="font-bold text-slate-700 group-hover:text-blue-600 transition-colors">{p.title}</h4>
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${getCategoryColor(p.category)}`}>{p.category}</span>
+                       </div>
+                       <p className="text-sm text-slate-500 line-clamp-1 mt-1 font-mono text-xs opacity-80">{p.content}</p>
+                    </div>
+                 ))}
+              </div>
+              <button onClick={() => setActiveView('prompts')} className="w-full mt-4 py-2 text-sm font-bold text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition">
+                 + Create Prompt
+              </button>
+           </div>
+
+           {/* Recent Frameworks */}
+           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                 <h3 className="font-bold text-slate-800 flex items-center gap-2"><Icons.Box size={18} className="text-emerald-500"/> Latest Frameworks</h3>
+                 <button onClick={() => setActiveView('frameworks')} className="text-xs font-bold text-slate-400 hover:text-slate-600">VIEW ALL</button>
+              </div>
+              <div className="space-y-3">
+                 {recentFrameworks.length === 0 && <p className="text-sm text-slate-400 italic">No frameworks created yet.</p>}
+                 {recentFrameworks.map(f => (
+                    <div 
+                      key={f.id} 
+                      onClick={() => { setTargetId(f.id); setActiveView('frameworks'); }}
+                      className="p-3 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition cursor-pointer group"
+                    >
+                       <div className="flex justify-between items-start">
+                          <h4 className="font-bold text-slate-700 group-hover:text-emerald-600 transition-colors">{f.title}</h4>
+                          <div className="flex items-center gap-1 text-slate-400 text-xs">
+                             <Icons.Clock size={12} />
+                             <span>{f.steps?.length || 0} steps</span>
+                          </div>
+                       </div>
+                       <p className="text-sm text-slate-500 line-clamp-1 mt-1">{f.description}</p>
+                    </div>
+                 ))}
+              </div>
+              <button onClick={() => setActiveView('frameworks')} className="w-full mt-4 py-2 text-sm font-bold text-emerald-600 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition">
+                 + New Framework
+              </button>
+           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-slate-800">Quick Actions</h3>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <button onClick={() => setView('prompts')} className="p-4 bg-blue-50 hover:bg-blue-100 rounded-xl text-left transition group">
-              <div className="text-blue-600 mb-2 group-hover:scale-110 transition-transform origin-left"><Icons.Plus /></div>
-              <div className="font-bold text-slate-800">New Prompt</div>
-            </button>
-             <button onClick={() => setView('frameworks')} className="p-4 bg-purple-50 hover:bg-purple-100 rounded-xl text-left transition group">
-              <div className="text-purple-600 mb-2 group-hover:scale-110 transition-transform origin-left"><Icons.Plus /></div>
-              <div className="font-bold text-slate-800">New Framework</div>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
 };
 
-const PromptsView = ({ selectedPromptId, setSelectedPromptId }: any) => {
-  const { prompts, loading } = usePrompts();
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+// --- View Components ---
+
+const PromptsView = ({ setIsMobileOpen, targetId }: any) => {
+  const { data: prompts, loading } = useCollection('prompts');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState('All');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   
+  // State for Create/Edit
+  const [promptForm, setPromptForm] = useState({ title: '', content: '', category: 'Other', tags: [] as string[], isFavorite: false });
+  
+  // Deep Linking Effect
+  useEffect(() => {
+    if (targetId && prompts.length > 0) {
+      const exists = prompts.find(p => p.id === targetId);
+      if (exists) setSelectedId(targetId);
+    }
+  }, [targetId, prompts]);
+
+  useEffect(() => {
+    if (selectedId) {
+      const p = prompts.find(i => i.id === selectedId);
+      if (p) setPromptForm({ ...p });
+      setIsEditing(false); // Reset edit mode when switching selection
+    }
+  }, [selectedId, prompts]);
+
   const filtered = prompts.filter(p => {
     if (activeCategory === 'All') return true;
     if (activeCategory === 'Favorites') return p.isFavorite;
-    return p.category === activeCategory;
+    return p.category === activeCategory || (p.tags && p.tags.includes(activeCategory));
   });
 
-  const handleDelete = async (id: string) => {
-    if (confirm("Are you sure you want to delete this prompt?")) {
-      await deleteDoc(doc(db, 'prompts', id));
-      if (selectedPromptId === id) setSelectedPromptId(null);
+  const handleDelete = async (id: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    
+    if(window.confirm("Delete this prompt permanently?")) {
+        try {
+          await deleteDoc(doc(db, 'prompts', id));
+          if (selectedId === id) setSelectedId(null);
+        } catch (err) {
+          console.error("Delete failed:", err);
+          alert("Could not delete prompt.");
+        }
+    }
+  }
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!promptForm.title) return;
+
+    try {
+      if (isEditing && selectedId) {
+        // Update existing
+        await updateDoc(doc(db, 'prompts', selectedId), {
+          ...promptForm,
+          updatedAt: serverTimestamp()
+        });
+        setIsEditing(false);
+      } else {
+        // Create new
+        await addDoc(collection(db, 'prompts'), {
+          ...promptForm,
+          isFavorite: false,
+          createdAt: serverTimestamp()
+        });
+        setIsModalOpen(false);
+      }
+    } catch (err) {
+      console.error("Error saving prompt:", err);
     }
   };
 
-  const selectedPrompt = prompts.find(p => p.id === selectedPromptId);
+  const PromptModal = () => (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setIsModalOpen(false)}>
+      <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="p-4 border-b flex justify-between items-center bg-slate-50">
+          <h3 className="font-bold">New Prompt</h3>
+          <button onClick={() => setIsModalOpen(false)}><Icons.X /></button>
+        </div>
+        <form onSubmit={handleSave} className="p-6 space-y-4">
+          <input 
+            className="w-full p-2 border rounded-lg font-bold" 
+            placeholder="Prompt Title" 
+            value={promptForm.title}
+            onChange={e => setPromptForm({...promptForm, title: e.target.value})}
+          />
+          <textarea 
+            className="w-full p-2 border rounded-lg h-40 font-mono text-sm" 
+            placeholder="Prompt content..."
+            value={promptForm.content}
+            onChange={e => setPromptForm({...promptForm, content: e.target.value})}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <select 
+               className="p-2 border rounded-lg"
+               value={promptForm.category}
+               onChange={e => setPromptForm({...promptForm, category: e.target.value})}
+            >
+              {UNIVERSAL_TAGS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <input 
+              className="p-2 border rounded-lg" 
+              placeholder="Tags (comma separated)" 
+              value={promptForm.tags?.join(', ')}
+              onChange={e => setPromptForm({...promptForm, tags: e.target.value.split(',').map(t => t.trim())})}
+            />
+          </div>
+          <button type="submit" className="w-full py-2 bg-blue-600 text-white rounded-lg font-bold">Create Prompt</button>
+        </form>
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex h-full bg-slate-50">
-       <CreatePromptModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} />
-       <GlobalFilterSidebar title="Prompts" activeGroup={activeCategory} setActiveGroup={setActiveCategory} isMobileOpen={isMobileSidebarOpen} onCloseMobile={() => setIsMobileSidebarOpen(false)} />
-       
-       <div className={`flex-1 flex flex-col min-w-0 h-full ${selectedPromptId ? 'hidden md:flex' : 'flex'}`}>
-          <div className="p-4 md:p-8 flex-1 flex flex-col h-full overflow-hidden">
-             <header className="flex justify-between items-center mb-6">
-                <div className="flex items-center gap-3">
-                   <button onClick={() => setIsMobileSidebarOpen(true)} className="md:hidden p-2 bg-white border rounded-lg"><Icons.Layout /></button>
-                   <h2 className="text-2xl font-bold text-slate-900">Prompts</h2>
-                </div>
-                <button onClick={() => setIsCreateModalOpen(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm hover:bg-blue-700 transition"><Icons.Plus /> New</button>
-             </header>
+      <FilterSidebar 
+        title="Prompts" 
+        activeGroup={activeCategory} 
+        setActiveGroup={setActiveCategory} 
+        isMobileOpen={isMobileSidebarOpen} 
+        onCloseMobile={() => setIsMobileSidebarOpen(false)} 
+      />
 
-             <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
-                {loading ? <div className="text-center text-slate-400 mt-10">Loading...</div> : filtered.map(prompt => (
-                   <div 
-                      key={prompt.id} 
-                      onClick={() => setSelectedPromptId(prompt.id)}
-                      className={`bg-white p-4 rounded-xl border cursor-pointer transition hover:shadow-md ${selectedPromptId === prompt.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-200 hover:border-blue-300'}`}
-                   >
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center gap-2">
-                           <span className={`px-2 py-0.5 rounded text-xs font-bold ${getCategoryColor(prompt.category)}`}>{prompt.category}</span>
-                           <h3 className="font-bold text-slate-800">{prompt.title}</h3>
-                        </div>
-                        {prompt.isFavorite && <div className="text-red-500"><Icons.Heart filled /></div>}
-                      </div>
-                      <p className="text-slate-500 text-sm line-clamp-2 mb-3 font-mono bg-slate-50 p-2 rounded">{prompt.content}</p>
-                      <div className="flex items-center justify-between text-xs text-slate-400">
-                         <div className="flex gap-2">
-                            {prompt.tags?.map(t => <span key={t}>#{t}</span>)}
-                         </div>
-                         <span>{formatDate(prompt.updatedAt)}</span>
-                      </div>
-                   </div>
-                ))}
-                {filtered.length === 0 && !loading && <div className="text-center text-slate-400 mt-10 italic">No prompts found in this category.</div>}
-             </div>
-          </div>
-       </div>
+      <div className={`flex-1 flex flex-col min-w-0 h-full ${selectedId ? 'hidden md:flex' : 'flex'}`}>
+        <div className="p-4 md:p-8 flex-1 flex flex-col h-full overflow-hidden">
+          <header className="flex justify-between items-center mb-6 gap-2">
+            <div className="flex items-center gap-3 overflow-hidden">
+               {/* Mobile: Main Navigation Trigger */}
+               <button onClick={() => setIsMobileOpen(true)} className="md:hidden p-2 bg-white border rounded-lg text-slate-700 shadow-sm shrink-0">
+                  <Icons.Menu size={20} />
+               </button>
+               
+               <h2 className="text-2xl font-bold text-slate-900 truncate">Prompts</h2>
+               
+               {/* Mobile: Filter Trigger */}
+               <button onClick={() => setIsMobileSidebarOpen(true)} className="md:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg shrink-0">
+                  <Icons.Sliders size={20} />
+               </button>
+            </div>
+            <button 
+              onClick={() => {
+                setPromptForm({ title: '', content: '', category: 'Marketing', tags: [], isFavorite: false });
+                setIsEditing(false);
+                setIsModalOpen(true);
+              }} 
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm hover:bg-blue-700 transition shrink-0"
+            >
+              <Icons.Plus /> <span className="hidden sm:inline">New</span>
+            </button>
+          </header>
 
-       {/* Detail Pane (Desktop: Side / Mobile: Full) */}
-       {selectedPrompt && (
-          <div className="fixed inset-0 z-50 bg-white md:static md:w-[500px] md:border-l border-slate-200 flex flex-col h-full shadow-2xl md:shadow-none">
-             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                <div className="flex items-center gap-2">
-                   <button onClick={() => setSelectedPromptId(null)} className="md:hidden p-2 -ml-2 text-slate-500"><Icons.ArrowLeft /></button>
-                   <span className={`px-2 py-1 rounded text-xs font-bold ${getCategoryColor(selectedPrompt.category)}`}>{selectedPrompt.category}</span>
+          <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
+            {loading ? <div className="text-center text-slate-400 mt-10">Loading...</div> : filtered.map(prompt => (
+              <div 
+                key={prompt.id} 
+                onClick={() => setSelectedId(prompt.id)}
+                className={`bg-white p-4 rounded-xl border cursor-pointer transition hover:shadow-md ${selectedId === prompt.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-200 hover:border-blue-300'}`}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${getCategoryColor(prompt.category)}`}>{prompt.category || 'General'}</span>
+                    <h3 className="font-bold text-slate-800">{prompt.title}</h3>
+                  </div>
+                  {prompt.isFavorite && <div className="text-red-500"><Icons.Heart filled /></div>}
                 </div>
-                <div className="flex gap-1">
-                   <button onClick={() => toggleFavorite('prompts', selectedPrompt.id, selectedPrompt.isFavorite)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-slate-100 rounded"><Icons.Heart filled={selectedPrompt.isFavorite} /></button>
-                   <button onClick={() => handleDelete(selectedPrompt.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-slate-100 rounded"><Icons.Trash /></button>
-                   <button onClick={() => setSelectedPromptId(null)} className="hidden md:block p-2 text-slate-400 hover:text-slate-600"><Icons.X /></button>
-                </div>
-             </div>
-             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                <h2 className="text-2xl font-bold text-slate-900 mb-4">{selectedPrompt.title}</h2>
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 font-mono text-sm text-slate-700 whitespace-pre-wrap mb-6 relative group">
-                   {selectedPrompt.content}
-                   <button 
-                      onClick={() => navigator.clipboard.writeText(selectedPrompt.content)}
-                      className="absolute top-2 right-2 p-2 bg-white border border-slate-200 rounded text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition"
-                      title="Copy"
-                   >
-                      <Icons.Copy />
-                   </button>
-                </div>
-                <div className="flex flex-wrap gap-2 mb-6">
-                   {selectedPrompt.tags?.map(tag => (
-                      <span key={tag} className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-full">#{tag}</span>
-                   ))}
-                </div>
-                <div className="text-xs text-slate-400 border-t border-slate-100 pt-4">
-                   Last updated: {formatDate(selectedPrompt.updatedAt)}
-                </div>
-             </div>
+                <p className="text-slate-500 text-sm line-clamp-2">{prompt.content}</p>
+              </div>
+            ))}
           </div>
-       )}
+        </div>
+      </div>
+
+      {/* Detail / Edit View */}
+      {selectedId && (
+        <div className="fixed inset-0 z-50 bg-white md:static md:w-[500px] md:border-l border-slate-200 flex flex-col h-full shadow-2xl md:shadow-none">
+            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <button onClick={() => setSelectedId(null)} className="md:hidden p-2 -ml-2 text-slate-500"><Icons.ArrowLeft /></button>
+              <div className="flex gap-2">
+                  <button onClick={() => setIsEditing(!isEditing)} className={`p-2 rounded ${isEditing ? 'bg-blue-100 text-blue-600' : 'text-slate-400 hover:bg-slate-100'}`}><Icons.Edit /></button>
+                  <button onClick={() => toggleFavorite('prompts', selectedId, promptForm.isFavorite)} className="p-2 text-slate-400 hover:text-red-500"><Icons.Heart filled={promptForm.isFavorite} /></button>
+                  <button type="button" onClick={(e) => handleDelete(selectedId, e)} className="p-2 text-slate-400 hover:text-red-500"><Icons.Trash /></button>
+                  <button onClick={() => setSelectedId(null)} className="hidden md:block p-2 text-slate-400 hover:text-slate-600"><Icons.X /></button>
+              </div>
+            </div>
+            
+            <div className="p-6 overflow-y-auto flex-1">
+              {isEditing ? (
+                 <form onSubmit={handleSave} className="space-y-4">
+                    <input 
+                      className="w-full p-2 border rounded-lg font-bold text-lg" 
+                      value={promptForm.title} 
+                      onChange={e => setPromptForm({...promptForm, title: e.target.value})}
+                    />
+                    <div className="flex gap-2">
+                       <select 
+                          className="p-2 border rounded-lg text-sm bg-slate-50"
+                          value={promptForm.category}
+                          onChange={e => setPromptForm({...promptForm, category: e.target.value})}
+                       >
+                          {UNIVERSAL_TAGS.map(t => <option key={t} value={t}>{t}</option>)}
+                       </select>
+                       <input 
+                          className="flex-1 p-2 border rounded-lg text-sm"
+                          value={promptForm.tags?.join(', ')}
+                          onChange={e => setPromptForm({...promptForm, tags: e.target.value.split(',').map(t => t.trim())})}
+                          placeholder="Tags..."
+                       />
+                    </div>
+                    <textarea 
+                      className="w-full p-3 border rounded-lg h-64 font-mono text-sm bg-slate-50" 
+                      value={promptForm.content} 
+                      onChange={e => setPromptForm({...promptForm, content: e.target.value})}
+                    />
+                    <button type="submit" className="w-full py-2 bg-blue-600 text-white rounded-lg font-bold">Save Changes</button>
+                 </form>
+              ) : (
+                <>
+                  <h2 className="text-2xl font-bold mb-4">{promptForm.title}</h2>
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 text-slate-700 whitespace-pre-wrap font-mono text-sm">
+                      {promptForm.content}
+                  </div>
+                  <div className="mt-4 flex gap-2 flex-wrap">
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${getCategoryColor(promptForm.category)}`}>{promptForm.category}</span>
+                      {promptForm.tags?.map((t: string) => <span key={t} className="px-2 py-1 bg-slate-100 rounded text-xs text-slate-600">#{t}</span>)}
+                  </div>
+                </>
+              )}
+            </div>
+        </div>
+      )}
+      
+      {isModalOpen && <PromptModal />}
     </div>
   );
 };
 
-const FrameworksView = ({ selectedFrameworkId, setSelectedFrameworkId }: any) => {
-  const { frameworks, loading } = useFrameworks();
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+const AssetsView = ({ setIsMobileOpen, targetId }: any) => {
+    const { data: assets, loading } = useCollection('assets');
+    const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [uploadFile, setUploadFile] = useState<File | null>(null);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [metadata, setMetadata] = useState({ title: '', description: '', category: '', tags: [] as string[] });
+    const [tagInput, setTagInput] = useState('');
+    const [activeCategory, setActiveCategory] = useState('All');
+    const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+    const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Deep Linking Effect
+    useEffect(() => {
+      // INTERCEPT MAGIC UPLOAD SIGNAL
+      if (targetId === 'MAGIC_UPLOAD') {
+         setEditingAssetId(null);
+         setMetadata({ title: '', description: '', category: ASSET_COLLECTIONS[0], tags: [] });
+         setPreviewUrl(null);
+         setUploadFile(null);
+         setIsUploadModalOpen(true);
+         return; // STOP EXECUTION HERE (Do not search for ID)
+      }
+
+      if (targetId && assets.length > 0) {
+        const target = assets.find(a => a.id === targetId);
+        if (target) handleEditOpen(target);
+      }
+    }, [targetId, assets]);
+
+    // Hybrid Filtering: Check Category field OR Tags fallback
+    const filteredAssets = assets.filter(asset => {
+      if (activeCategory === 'All') return true;
+      if (activeCategory === 'Favorites') return asset.isFavorite;
+      
+      const assetCat = asset.category;
+      
+      // 1. Direct Category Match
+      if (assetCat === activeCategory) return true;
+      
+      // 2. Smart Fallback for Legacy Assets (Empty category or mismatch)
+      if (!assetCat || !ASSET_COLLECTIONS.includes(assetCat)) {
+         if (activeCategory === 'Archives / Other') {
+            // If viewing Archives, show items that DON'T match other main categories in their tags
+            const matchesOther = ASSET_COLLECTIONS.some(c => asset.tags?.some((t: string) => c.includes(t)));
+            return !matchesOther;
+         }
+         // Fuzzy match in tags (e.g. tag "Fashion" shows in "Lifestyle & Fashion")
+         return asset.tags?.some((t: string) => activeCategory.includes(t));
+      }
+      
+      return false;
+    });
+
+    // Handle Asset Deletion (Ghost Proof)
+    const handleDeleteAsset = async (asset: any, e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      
+      if (!window.confirm("Permanently delete this asset?")) return;
+
+      // 1. Try Delete Storage (Best Effort)
+      if (asset.url) {
+        try {
+          const fileRef = ref(storage, asset.url);
+          await deleteObject(fileRef);
+        } catch (err) {
+          console.warn("Storage delete skipped (Ghost asset?):", err);
+        }
+      }
+
+      // 2. Always Delete Firestore Doc
+      try {
+        await deleteDoc(doc(db, 'assets', asset.id));
+      } catch (err) {
+        alert("Error deleting record.");
+      }
+    };
+
+    const handleEditOpen = (asset: any) => {
+       setEditingAssetId(asset.id);
+       setMetadata({ 
+         title: asset.title, 
+         description: asset.description, 
+         category: asset.category || 'Archives / Other', 
+         tags: asset.tags || [] 
+       });
+       setPreviewUrl(asset.url);
+       setUploadFile(null); // No new file by default
+       setIsUploadModalOpen(true);
+    };
+
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files[0]) {
+        const file = e.target.files[0];
+        setUploadFile(file);
+        
+        // Create preview
+        const url = URL.createObjectURL(file);
+        setPreviewUrl(url);
+
+        // Start Gemini Analysis
+        setIsAnalyzing(true);
+        const analysis = await analyzeImageWithGemini(file);
+        setMetadata(analysis);
+        setIsAnalyzing(false);
+      }
+    };
+
+    const handleSave = async () => {
+      if (!metadata.title) return;
+
+      try {
+        if (editingAssetId) {
+             // Update Mode (Metadata only)
+             await updateDoc(doc(db, 'assets', editingAssetId), {
+               title: metadata.title,
+               description: metadata.description,
+               category: metadata.category,
+               tags: metadata.tags,
+               updatedAt: serverTimestamp()
+             });
+        } else {
+             // Create Mode
+             if (!uploadFile) return;
+             const storageRef = ref(storage, `assets/${Date.now()}_${uploadFile.name}`);
+             await uploadBytes(storageRef, uploadFile);
+             const url = await getDownloadURL(storageRef);
+
+             await addDoc(collection(db, 'assets'), {
+               title: metadata.title,
+               description: metadata.description,
+               category: metadata.category,
+               tags: metadata.tags,
+               url: url,
+               type: 'image',
+               isFavorite: false,
+               createdAt: serverTimestamp()
+             });
+        }
+
+        handleClose();
+      } catch (error) {
+        console.error("Save failed", error);
+        alert("Save failed. Please try again.");
+      }
+    };
+
+    const handleClose = () => {
+      setIsUploadModalOpen(false);
+      setUploadFile(null);
+      setPreviewUrl(null);
+      setMetadata({ title: '', description: '', category: '', tags: [] });
+      setEditingAssetId(null);
+      setTagInput('');
+    };
+
+    const addTag = () => {
+       if (tagInput && !metadata.tags.includes(tagInput)) {
+         setMetadata(prev => ({ ...prev, tags: [...prev.tags, tagInput] }));
+         setTagInput('');
+       }
+    };
+
+    const removeTag = (t: string) => {
+       setMetadata(prev => ({ ...prev, tags: prev.tags.filter(tag => tag !== t) }));
+    }
+  
+    return (
+      <div className="flex h-full bg-slate-50">
+        <FilterSidebar 
+          title="Assets" 
+          activeGroup={activeCategory} 
+          setActiveGroup={setActiveCategory} 
+          isMobileOpen={isMobileSidebarOpen} 
+          onCloseMobile={() => setIsMobileSidebarOpen(false)} 
+          categories={['All', 'Favorites', ...ASSET_COLLECTIONS]} // Hybrid collections
+        />
+
+        <div className="p-4 md:p-8 flex-1 flex flex-col h-full overflow-hidden min-w-0">
+            <header className="flex justify-between items-center mb-6 gap-2">
+              <div className="flex items-center gap-3 overflow-hidden">
+                 {/* Mobile: Main Navigation Trigger */}
+                 <button onClick={() => setIsMobileOpen(true)} className="md:hidden p-2 bg-white border rounded-lg text-slate-700 shadow-sm shrink-0">
+                    <Icons.Menu size={20} />
+                 </button>
+                 
+                 <h2 className="text-2xl font-bold text-slate-900 truncate">Digital Assets</h2>
+
+                 {/* Mobile: Filter Trigger */}
+                 <button onClick={() => setIsMobileSidebarOpen(true)} className="md:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg shrink-0">
+                    <Icons.Sliders size={20} />
+                 </button>
+              </div>
+              <button 
+                onClick={() => {
+                  setEditingAssetId(null);
+                  setMetadata({ title: '', description: '', category: ASSET_COLLECTIONS[0], tags: [] });
+                  setPreviewUrl(null);
+                  setIsUploadModalOpen(true);
+                }} 
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm hover:bg-blue-700 transition shrink-0"
+              >
+                <Icons.Plus /> <span className="hidden sm:inline">Upload</span>
+              </button>
+            </header>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 overflow-y-auto custom-scrollbar pb-20">
+                {loading ? <div className="col-span-full text-center text-slate-400">Loading assets...</div> : filteredAssets.map(asset => (
+                    <div 
+                       key={asset.id} 
+                       onClick={() => handleEditOpen(asset)}
+                       className="group relative bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-md transition aspect-square flex flex-col cursor-pointer"
+                    >
+                         {asset.url ? (
+                             <img 
+                               src={asset.url} 
+                               alt={asset.title} 
+                               className="w-full h-full object-cover" 
+                               onError={(e) => {
+                                 // Placeholder for broken/ghost image
+                                 const target = e.target as HTMLImageElement;
+                                 target.style.display = 'none';
+                                 target.parentElement?.querySelector('.fallback-icon')?.classList.remove('hidden');
+                               }}
+                             />
+                         ) : (
+                             <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400"><Icons.FileText size={48} /></div>
+                         )}
+                         
+                         {/* Fallback for Broken/Ghost Images */}
+                         <div className="fallback-icon hidden absolute inset-0 bg-slate-100 flex flex-col items-center justify-center text-slate-400">
+                             <Icons.AlertTriangle size={32} className="mb-2 text-amber-500" />
+                             <span className="text-xs font-bold text-amber-600">Image Missing</span>
+                         </div>
+
+                         {/* Overlay Actions */}
+                         <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3">
+                             <div className="flex justify-end gap-2">
+                                <button type="button" onClick={(e) => {e.stopPropagation(); toggleFavorite('assets', asset.id, asset.isFavorite)}} className="text-white hover:text-red-400">
+                                   <Icons.Heart filled={asset.isFavorite} />
+                                </button>
+                                <button type="button" onClick={(e) => handleDeleteAsset(asset, e)} className="text-white hover:text-red-400 bg-white/20 p-1 rounded-full backdrop-blur-sm">
+                                   <Icons.Trash size={16} />
+                                </button>
+                             </div>
+                             <div>
+                               <p className="text-white font-bold text-sm truncate">{asset.title}</p>
+                               <span className="inline-block px-1.5 py-0.5 rounded bg-white/20 text-white text-[10px] backdrop-blur-sm">
+                                 {asset.category || 'No Category'}
+                               </span>
+                             </div>
+                         </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+
+        {/* Unified Upload / Edit Modal */}
+        {isUploadModalOpen && (
+             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-0 md:p-4" onClick={handleClose}>
+                <div 
+                  className="bg-white md:rounded-xl shadow-2xl w-full max-w-5xl h-full md:h-[85vh] flex flex-col md:flex-row overflow-hidden" 
+                  onClick={e => e.stopPropagation()}
+                >
+                    {/* Left: Preview */}
+                    <div className="w-full md:w-1/2 bg-slate-50 p-6 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-200 relative shrink-0 min-h-[200px] md:min-h-0">
+                        {previewUrl ? (
+                          <div className="relative w-full h-full rounded-lg overflow-hidden flex items-center justify-center">
+                            <img src={previewUrl} alt="Preview" className="max-w-full max-h-full object-contain" />
+                            {isAnalyzing && (
+                              <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-white backdrop-blur-sm">
+                                <Icons.Sparkles className="animate-pulse mb-2" size={32} />
+                                <span className="font-medium animate-pulse">Gemini Analyzing...</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div 
+                            onClick={() => fileInputRef.current?.click()}
+                            className="w-full h-64 md:h-full border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:bg-slate-100 transition"
+                          >
+                             <Icons.Upload size={48} className="mb-4 opacity-50" />
+                             <p className="font-medium">Click to upload image</p>
+                          </div>
+                        )}
+                        {!editingAssetId && (
+                           <input 
+                             type="file" 
+                             ref={fileInputRef} 
+                             className="hidden" 
+                             accept="image/*"
+                             onChange={handleFileSelect}
+                           />
+                        )}
+                    </div>
+
+                    {/* Right: Metadata - Fixed Height Fix applied via md:h-[85vh] on parent */}
+                    <div className="w-full md:w-1/2 flex flex-col h-full min-h-0">
+                      <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-white z-10">
+                        <h3 className="text-xl font-bold text-slate-800">{editingAssetId ? 'Edit Asset' : 'New Asset'}</h3>
+                        <button onClick={handleClose} className="text-slate-400 hover:text-slate-600"><Icons.X /></button>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar">
+                        <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-2">Title</label>
+                          <input
+                            className="w-full p-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+                            value={metadata.title}
+                            onChange={(e) => setMetadata({...metadata, title: e.target.value})}
+                          />
+                        </div>
+
+                        <div>
+                           <label className="block text-sm font-bold text-slate-700 mb-2">Collection</label>
+                           <select 
+                              className="w-full p-3 border border-slate-200 rounded-lg bg-white"
+                              value={metadata.category}
+                              onChange={(e) => setMetadata({...metadata, category: e.target.value})}
+                           >
+                              {ASSET_COLLECTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                           </select>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-2">Description</label>
+                          <textarea 
+                            rows={4}
+                            className="w-full p-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-none"
+                            value={metadata.description}
+                            onChange={(e) => setMetadata({...metadata, description: e.target.value})}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-2">Tags</label>
+                          <div className="flex flex-wrap gap-2 mb-2">
+                             {metadata.tags.map(tag => (
+                                <span key={tag} className="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-sm font-medium flex items-center gap-1">
+                                   {tag}
+                                   <button onClick={() => removeTag(tag)} className="hover:text-blue-900"><Icons.X size={14}/></button>
+                                </span>
+                             ))}
+                          </div>
+                          <input 
+                             className="w-full p-2 border border-slate-200 rounded-lg text-sm"
+                             placeholder="Type tag and press Enter..."
+                             value={tagInput}
+                             onChange={e => setTagInput(e.target.value)}
+                             onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                   e.preventDefault();
+                                   addTag();
+                                }
+                             }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="p-5 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+                        <button onClick={handleClose} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium transition">Cancel</button>
+                        <button 
+                          onClick={handleSave} 
+                          disabled={(!uploadFile && !editingAssetId) || !metadata.title || isAnalyzing}
+                          className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 transition shadow-lg shadow-blue-200 flex items-center gap-2"
+                        >
+                          {isAnalyzing ? 'Processing...' : 'Save Asset'}
+                        </button>
+                      </div>
+                    </div>
+                </div>
+             </div>
+        )}
+      </div>
+    );
+  };
+
+const FrameworksView = ({ selectedFrameworkId, setSelectedFrameworkId, setIsMobileOpen, targetId }: any) => {
+  const { data: frameworks, loading } = useCollection('frameworks');
   const [activeCategory, setActiveCategory] = useState('All');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  
+  // Create / Edit State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [fwForm, setFwForm] = useState({ 
+     title: '', description: '', category: 'Strategy', tags: [] as string[], steps: [] as string[], isFavorite: false 
+  });
+  const [stepInput, setStepInput] = useState('');
+
+  // Deep Linking Effect
+  useEffect(() => {
+    if (targetId && frameworks.length > 0) {
+      const exists = frameworks.find(f => f.id === targetId);
+      if (exists) setSelectedFrameworkId(targetId);
+    }
+  }, [targetId, frameworks]);
+
+  // Update form when selection changes
+  useEffect(() => {
+    if (selectedFrameworkId) {
+       const fw = frameworks.find(f => f.id === selectedFrameworkId);
+       if (fw) setFwForm({ ...fw });
+       setIsEditing(false);
+    }
+  }, [selectedFrameworkId, frameworks]);
   
   const filtered = frameworks.filter(f => {
     if (activeCategory === 'All') return true;
@@ -1047,28 +1215,139 @@ const FrameworksView = ({ selectedFrameworkId, setSelectedFrameworkId }: any) =>
     return f.category === activeCategory;
   });
 
-  const handleDelete = async (id: string) => {
-    if (confirm("Delete this framework?")) {
-      await deleteDoc(doc(db, 'frameworks', id));
-      if (selectedFrameworkId === id) setSelectedFrameworkId(null);
+  const handleDelete = async (id: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    
+    if (window.confirm("Are you sure you want to delete this framework?")) {
+      try {
+        await deleteDoc(doc(db, 'frameworks', id));
+        if (selectedFrameworkId === id) setSelectedFrameworkId(null);
+      } catch (err) {
+        console.error("Delete failed:", err);
+        alert("Failed to delete framework.");
+      }
     }
   };
 
-  const selectedFramework = frameworks.find(f => f.id === selectedFrameworkId);
+  const handleSave = async (e: React.FormEvent) => {
+     e.preventDefault();
+     if (!fwForm.title) return;
+
+     const data = { ...fwForm, tags: fwForm.tags || [], steps: fwForm.steps || [] };
+
+     try {
+        if (isEditing && selectedFrameworkId) {
+           await updateDoc(doc(db, 'frameworks', selectedFrameworkId), { ...data, updatedAt: serverTimestamp() });
+           setIsEditing(false);
+        } else {
+           await addDoc(collection(db, 'frameworks'), { ...data, isFavorite: false, createdAt: serverTimestamp() });
+           setIsModalOpen(false);
+        }
+     } catch (err) {
+        console.error(err);
+     }
+  };
+
+  const addStep = () => {
+     if (stepInput) {
+        setFwForm(prev => ({ ...prev, steps: [...prev.steps, stepInput] }));
+        setStepInput('');
+     }
+  };
+
+  const removeStep = (index: number) => {
+     setFwForm(prev => ({ ...prev, steps: prev.steps.filter((_, i) => i !== index) }));
+  };
+
+  // Shared Form UI (Used in Modal and Sidebar)
+  const FrameworkFormUI = () => (
+     <div className="space-y-4">
+        <input 
+           className="w-full p-2 border rounded-lg font-bold"
+           placeholder="Framework Title"
+           value={fwForm.title}
+           onChange={e => setFwForm({...fwForm, title: e.target.value})}
+        />
+        <div className="flex gap-2">
+            <select 
+              className="p-2 border rounded-lg bg-white"
+              value={fwForm.category}
+              onChange={e => setFwForm({...fwForm, category: e.target.value})}
+            >
+               {UNIVERSAL_TAGS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+        </div>
+        <textarea 
+           className="w-full p-2 border rounded-lg text-sm"
+           placeholder="Description..."
+           rows={3}
+           value={fwForm.description}
+           onChange={e => setFwForm({...fwForm, description: e.target.value})}
+        />
+        
+        <div>
+           <label className="text-xs font-bold uppercase text-slate-500">Steps</label>
+           <div className="space-y-2 mt-2">
+              {fwForm.steps.map((s, i) => (
+                 <div key={i} className="flex gap-2 items-start bg-slate-50 p-2 rounded text-sm">
+                    <span className="font-bold text-slate-400">{i+1}.</span>
+                    <span className="flex-1">{s}</span>
+                    <button type="button" onClick={() => removeStep(i)} className="text-red-400"><Icons.X size={14}/></button>
+                 </div>
+              ))}
+              <div className="flex gap-2 mt-2">
+                 <input 
+                    className="flex-1 p-2 border rounded text-sm"
+                    placeholder="Next step..."
+                    value={stepInput}
+                    onChange={e => setStepInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addStep())}
+                 />
+                 <button type="button" onClick={addStep} className="p-2 bg-slate-200 rounded hover:bg-slate-300"><Icons.Plus size={16}/></button>
+              </div>
+           </div>
+        </div>
+     </div>
+  );
 
   return (
     <div className="flex h-full bg-slate-50">
-       <CreateFrameworkModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} />
-       <GlobalFilterSidebar title="Frameworks" activeGroup={activeCategory} setActiveGroup={setActiveCategory} isMobileOpen={isMobileSidebarOpen} onCloseMobile={() => setIsMobileSidebarOpen(false)} />
+       <FilterSidebar 
+          title="Frameworks" 
+          activeGroup={activeCategory} 
+          setActiveGroup={setActiveCategory} 
+          isMobileOpen={isMobileSidebarOpen} 
+          onCloseMobile={() => setIsMobileSidebarOpen(false)} 
+       />
        
        <div className={`flex-1 flex flex-col min-w-0 h-full ${selectedFrameworkId ? 'hidden md:flex' : 'flex'}`}>
           <div className="p-4 md:p-8 flex-1 flex flex-col h-full overflow-hidden">
-             <header className="flex justify-between items-center mb-6">
-                <div className="flex items-center gap-3">
-                   <button onClick={() => setIsMobileSidebarOpen(true)} className="md:hidden p-2 bg-white border rounded-lg"><Icons.Layout /></button>
-                   <h2 className="text-2xl font-bold text-slate-900">Frameworks</h2>
+             <header className="flex justify-between items-center mb-6 gap-2">
+                <div className="flex items-center gap-3 overflow-hidden">
+                   {/* Mobile: Main Navigation Trigger */}
+                   <button onClick={() => setIsMobileOpen(true)} className="md:hidden p-2 bg-white border rounded-lg text-slate-700 shadow-sm shrink-0">
+                      <Icons.Menu size={20} />
+                   </button>
+                   
+                   <h2 className="text-2xl font-bold text-slate-900 truncate">Frameworks</h2>
+
+                   {/* Mobile: Filter Trigger */}
+                   <button onClick={() => setIsMobileSidebarOpen(true)} className="md:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg shrink-0">
+                      <Icons.Sliders size={20} />
+                   </button>
                 </div>
-                <button onClick={() => setIsCreateModalOpen(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm hover:bg-blue-700 transition"><Icons.Plus /> New</button>
+                <button 
+                   onClick={() => {
+                      setFwForm({ title: '', description: '', category: 'Strategy', tags: [], steps: [], isFavorite: false });
+                      setIsModalOpen(true);
+                   }} 
+                   className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm hover:bg-blue-700 transition shrink-0"
+                >
+                   <Icons.Plus /> <span className="hidden sm:inline">New</span>
+                </button>
              </header>
 
              <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
@@ -1085,13 +1364,9 @@ const FrameworksView = ({ selectedFrameworkId, setSelectedFrameworkId }: any) =>
                         </div>
                         {fw.isFavorite && <div className="text-red-500"><Icons.Heart filled /></div>}
                       </div>
-                      <p className="text-slate-500 text-sm mb-3">{fw.description}</p>
+                      <p className="text-slate-500 text-sm mb-3 line-clamp-2">{fw.description}</p>
                       <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-50 p-2 rounded">
-                          <span className="font-bold text-slate-600">{fw.steps.length} Steps</span>
-                          <span>•</span>
-                          <div className="flex gap-2">
-                            {fw.tags?.map(t => <span key={t}>#{t}</span>)}
-                         </div>
+                          <span className="font-bold text-slate-600">{fw.steps?.length || 0} Steps</span>
                       </div>
                    </div>
                 ))}
@@ -1099,134 +1374,145 @@ const FrameworksView = ({ selectedFrameworkId, setSelectedFrameworkId }: any) =>
           </div>
        </div>
 
-       {selectedFramework && (
+       {/* Detail / Edit View */}
+       {selectedFrameworkId && (
           <div className="fixed inset-0 z-50 bg-white md:static md:w-[500px] md:border-l border-slate-200 flex flex-col h-full shadow-2xl md:shadow-none">
              <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                 <div className="flex items-center gap-2">
                    <button onClick={() => setSelectedFrameworkId(null)} className="md:hidden p-2 -ml-2 text-slate-500"><Icons.ArrowLeft /></button>
-                   <span className={`px-2 py-1 rounded text-xs font-bold ${getCategoryColor(selectedFramework.category)}`}>{selectedFramework.category}</span>
+                   {!isEditing && <span className={`px-2 py-1 rounded text-xs font-bold ${getCategoryColor(fwForm.category)}`}>{fwForm.category}</span>}
                 </div>
                 <div className="flex gap-1">
-                   <button onClick={() => toggleFavorite('frameworks', selectedFramework.id, selectedFramework.isFavorite)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-slate-100 rounded"><Icons.Heart filled={selectedFramework.isFavorite} /></button>
-                   <button onClick={() => handleDelete(selectedFramework.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-slate-100 rounded"><Icons.Trash /></button>
+                   <button onClick={() => setIsEditing(!isEditing)} className={`p-2 rounded ${isEditing ? 'bg-blue-100 text-blue-600' : 'text-slate-400 hover:bg-slate-100'}`}><Icons.Edit /></button>
+                   <button onClick={() => toggleFavorite('frameworks', selectedFrameworkId, fwForm.isFavorite)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-slate-100 rounded"><Icons.Heart filled={fwForm.isFavorite} /></button>
+                   <button type="button" onClick={(e) => handleDelete(selectedFrameworkId, e)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-slate-100 rounded"><Icons.Trash /></button>
                    <button onClick={() => setSelectedFrameworkId(null)} className="hidden md:block p-2 text-slate-400 hover:text-slate-600"><Icons.X /></button>
                 </div>
              </div>
+             
              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                <h2 className="text-2xl font-bold text-slate-900 mb-2">{selectedFramework.title}</h2>
-                <p className="text-slate-600 mb-6">{selectedFramework.description}</p>
-                
-                <h3 className="font-bold text-slate-400 uppercase text-xs mb-3 tracking-wider">Process Steps</h3>
-                <div className="space-y-4 mb-6">
-                    {selectedFramework.steps.map((step, idx) => (
-                        <div key={idx} className="flex gap-4">
-                            <div className="flex-shrink-0 w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center font-bold text-slate-500 text-sm">{idx + 1}</div>
-                            <div className="flex-1 bg-slate-50 p-3 rounded-lg border border-slate-100 text-slate-800 text-sm">
-                                {step}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                <div className="flex flex-wrap gap-2 mb-6">
-                   {selectedFramework.tags?.map(tag => (
-                      <span key={tag} className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-full">#{tag}</span>
-                   ))}
-                </div>
+                {isEditing ? (
+                   <form onSubmit={handleSave}>
+                      <FrameworkFormUI />
+                      <button type="submit" className="mt-6 w-full py-2 bg-blue-600 text-white rounded-lg font-bold">Save Changes</button>
+                   </form>
+                ) : (
+                   <>
+                      <h2 className="text-2xl font-bold text-slate-900 mb-2">{fwForm.title}</h2>
+                      <p className="text-slate-600 mb-6">{fwForm.description}</p>
+                      
+                      <h3 className="font-bold text-slate-400 uppercase text-xs mb-3 tracking-wider">Process Steps</h3>
+                      <div className="space-y-4 mb-6">
+                          {fwForm.steps?.map((step: any, idx: number) => (
+                              <div key={idx} className="flex gap-4">
+                                  <div className="flex-shrink-0 w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center font-bold text-slate-500 text-sm">{idx + 1}</div>
+                                  <div className="flex-1 bg-slate-50 p-3 rounded-lg border border-slate-100 text-slate-800 text-sm">
+                                      {step}
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                   </>
+                )}
              </div>
           </div>
+       )}
+
+       {/* Create Modal */}
+       {isModalOpen && (
+         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setIsModalOpen(false)}>
+            <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+               <div className="p-4 border-b flex justify-between items-center bg-slate-50">
+                  <h3 className="font-bold">New Framework</h3>
+                  <button onClick={() => setIsModalOpen(false)}><Icons.X /></button>
+               </div>
+               <form onSubmit={handleSave} className="p-6 overflow-y-auto max-h-[80vh]">
+                  <FrameworkFormUI />
+                  <button type="submit" className="mt-6 w-full py-2 bg-blue-600 text-white rounded-lg font-bold">Create Framework</button>
+               </form>
+            </div>
+         </div>
        )}
     </div>
   );
 };
 
-const AssetsView = () => {
-    const { assets, loading } = useAssets();
-    const { collections } = useAssetCollections();
-    const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-    const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-    const [activeGroup, setActiveGroup] = useState('All');
-    const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-    const { user } = useAuth();
-
-    const handleCreateCollection = async () => { const t = prompt("Name:"); if (t && user) await addDoc(collection(db, 'collections'), { title: t, userId: user.uid, createdAt: serverTimestamp() }); };
-    const handleDeleteAsset = async (asset: Asset) => { if (confirm("Delete?")) { try { await deleteObject(ref(storage, asset.storagePath)); await deleteDoc(doc(db, 'assets', asset.id)); setSelectedAsset(null); } catch (e) { console.error(e); } } };
-
-    const filtered = assets.filter(a => {
-        if (activeGroup === 'All') return true;
-        if (activeGroup === 'Favorites') return a.isFavorite;
-        const isCat = CATEGORIES.some(c => c.id === activeGroup);
-        if (isCat) return a.category === activeGroup;
-        return a.collectionId === activeGroup;
-    });
-
-    return (
-        <div className="flex h-full bg-slate-50">
-            <UploadAssetModal isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)} />
-            {selectedAsset && <ImageLightbox asset={selectedAsset} onClose={() => setSelectedAsset(null)} />}
-            <GlobalFilterSidebar title="Assets" activeGroup={activeGroup} setActiveGroup={setActiveGroup} collections={collections} onCreateCollection={handleCreateCollection} showCollections={true} isMobileOpen={isMobileSidebarOpen} onCloseMobile={() => setIsMobileSidebarOpen(false)} />
-            <div className="flex-1 flex flex-col min-w-0 h-full">
-                <div className="p-4 md:p-8 flex-1 flex flex-col h-full overflow-hidden">
-                    <header className="flex justify-between items-center mb-6"><div className="flex items-center gap-3"><button onClick={() => setIsMobileSidebarOpen(true)} className="md:hidden p-2 bg-white border rounded-lg"><Icons.Layout /></button><h2 className="text-2xl font-bold text-slate-900">Assets</h2></div><button onClick={() => setIsUploadModalOpen(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2"><Icons.Upload /> Upload</button></header>
-                    <div className="flex-1 overflow-y-auto">{loading ? <div className="text-center text-slate-400 mt-10">Loading...</div> : <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{filtered.map(a => (<div key={a.id} onClick={() => setSelectedAsset(a)} className="group relative aspect-square bg-slate-200 rounded-xl overflow-hidden cursor-pointer"><img src={a.fileUrl} className="w-full h-full object-cover" /><div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex flex-col justify-end p-2"><div className="text-white text-xs font-bold truncate">{a.title}</div><div className="flex justify-end gap-2 mt-1"><button onClick={(e) => { e.stopPropagation(); toggleFavorite('assets', a.id, a.isFavorite); }} className="text-white hover:text-red-400"><Icons.Heart filled={a.isFavorite} /></button><button onClick={(e) => { e.stopPropagation(); handleDeleteAsset(a); }} className="text-white hover:text-red-400"><Icons.Trash /></button></div></div></div>))}</div>}</div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const WorkflowsView = () => {
-    const { workflows, loading } = useWorkflows();
-    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-    const [activeCategory, setActiveCategory] = useState('All');
-    const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-    const filtered = workflows.filter(w => { if (activeCategory === 'Favorites') return w.isFavorite; return activeCategory === 'All' || w.category === activeCategory; });
-    const handleDelete = async (id: string) => { if(confirm("Delete?")) await deleteDoc(doc(db, 'workflows', id)); };
-
-    return (
-        <div className="flex h-full bg-slate-50">
-            <CreateWorkflowModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} />
-            <GlobalFilterSidebar title="Workflows" activeGroup={activeCategory} setActiveGroup={setActiveCategory} isMobileOpen={isMobileSidebarOpen} onCloseMobile={() => setIsMobileSidebarOpen(false)} />
-            <div className="flex-1 flex flex-col min-w-0 h-full">
-                <div className="p-4 md:p-8 flex-1 flex flex-col h-full overflow-hidden">
-                    <header className="flex justify-between items-center mb-6"><div className="flex items-center gap-3"><button onClick={() => setIsMobileSidebarOpen(true)} className="md:hidden p-2 bg-white border rounded-lg"><Icons.Layout /></button><h2 className="text-2xl font-bold text-slate-900">Workflows</h2></div><button onClick={() => setIsCreateModalOpen(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2"><Icons.Plus /> New</button></header>
-                    <div className="flex-1 overflow-y-auto space-y-4">{filtered.map(flow => (<div key={flow.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm"><div className="flex justify-between items-start mb-3"><div className="flex items-center gap-3"><div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white ${getCategoryColor(flow.category).replace('text-', 'bg-').split(' ')[0]}`}><Icons.Workflows /></div><div><h3 className="font-bold text-slate-900">{flow.title}</h3><p className="text-sm text-slate-500">{flow.goal}</p></div></div><div className="flex gap-2"><button onClick={() => toggleFavorite('workflows', flow.id, flow.isFavorite)} className="text-slate-300 hover:text-red-500"><Icons.Heart filled={flow.isFavorite} /></button><button onClick={() => handleDelete(flow.id)} className="text-slate-300 hover:text-red-500"><Icons.Trash /></button></div></div><div className="bg-slate-50 p-3 rounded flex items-center gap-4 text-sm text-slate-600"><span className="flex items-center gap-1"><Icons.Prompts /> Ingredient</span><Icons.ArrowLeft /><span className="flex items-center gap-1">Method <Icons.Shield /></span></div></div>))}</div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const App = () => {
-  const { user, loading, signOut } = useAuth();
-  const [view, setView] = useState('dashboard');
-  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
+// --- App Container ---
+const AppContent = () => {
+  const { user, loading: authLoading, signOut } = useAuth();
+  const [activeView, setActiveView] = useState('dashboard');
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [selectedFrameworkId, setSelectedFrameworkId] = useState<string | null>(null);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isHealthCheckOpen, setIsHealthCheckOpen] = useState(false);
+  
+  // Navigation Parameter State (for Deep Linking from Dashboard)
+  const [targetId, setTargetId] = useState<string | null>(null);
 
-  if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-50 text-slate-400">Loading Vault...</div>;
+  // Clear targetId when switching views naturally to prevent sticky selection
+  useEffect(() => {
+    // Optional: We might want to clear targetId after a short delay or when view changes 
+    // BUT child views are responsible for consuming it.
+    // Here we mainly ensure that if the user clicks a menu item manually, we reset deep links.
+  }, [activeView]);
+
+  if (authLoading) return <div className="h-screen flex items-center justify-center text-slate-400">Loading Vault...</div>;
   if (!user) return <LoginView />;
 
   return (
-    <div className="flex flex-col md:flex-row h-[100dvh] bg-slate-50 text-slate-900 font-sans overflow-hidden">
-      <HealthCheckModal isOpen={isHealthCheckOpen} onClose={() => setIsHealthCheckOpen(false)} />
-      <Sidebar view={view} setView={setView} user={user} signOut={signOut} isOpen={isMenuOpen} closeMenu={() => setIsMenuOpen(false)} onRunDiagnostics={() => setIsHealthCheckOpen(true)} />
-      <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden relative">
-        <MobileHeader onMenuClick={() => setIsMenuOpen(true)} />
-        <main className="flex-1 overflow-hidden relative">
-            {view === 'dashboard' && <DashboardView setView={setView} setSelectedPromptId={setSelectedPromptId} />}
-            {view === 'prompts' && <PromptsView selectedPromptId={selectedPromptId} setSelectedPromptId={setSelectedPromptId} />}
-            {view === 'frameworks' && <FrameworksView selectedFrameworkId={selectedFrameworkId} setSelectedFrameworkId={setSelectedFrameworkId} />}
-            {view === 'assets' && <AssetsView />}
-            {view === 'workflows' && <WorkflowsView />}
-        </main>
-        <GlobalAIAssistant />
-      </div>
+    <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
+       <Sidebar 
+         activeView={activeView} 
+         setActiveView={(view: string) => { setActiveView(view); setTargetId(null); }} 
+         isMobileOpen={isMobileOpen} 
+         setIsMobileOpen={setIsMobileOpen} 
+         user={user}
+         signOut={signOut}
+       />
+       
+       <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+          
+          {activeView === 'dashboard' && (
+             <DashboardView 
+                setActiveView={setActiveView} 
+                setIsMobileOpen={setIsMobileOpen} 
+                setTargetId={setTargetId}
+                user={user}
+             />
+          )}
+          
+          {activeView === 'prompts' && (
+             <PromptsView 
+                setIsMobileOpen={setIsMobileOpen} 
+                targetId={targetId}
+             />
+          )}
+          
+          {activeView === 'assets' && (
+             <AssetsView 
+                setIsMobileOpen={setIsMobileOpen} 
+                targetId={targetId}
+             />
+          )}
+          
+          {activeView === 'frameworks' && (
+            <FrameworksView 
+               selectedFrameworkId={selectedFrameworkId} 
+               setSelectedFrameworkId={setSelectedFrameworkId} 
+               setIsMobileOpen={setIsMobileOpen}
+               targetId={targetId}
+            />
+          )}
+       </main>
     </div>
   );
 };
 
-const container = document.getElementById('root');
-const root = createRoot(container!);
-root.render(<AuthProvider><App /></AuthProvider>);
+const App = () => {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+};
+
+const root = createRoot(document.getElementById('root')!);
+root.render(<App />);
