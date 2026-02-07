@@ -143,7 +143,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNavigate }) => {
                           {item.title}
                         </h3>
                         <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1">
-                          {(item as any).description || (item as any).content?.slice(0, 60) + '...'}
+                          {('description' in item ? item.description : item.content)?.slice(0, 60) + '...'}
                         </p>
                       </div>
                     </div>

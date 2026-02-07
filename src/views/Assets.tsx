@@ -1,6 +1,6 @@
 // views/Assets.tsx - Refactored assets view with masonry layout
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Button, Card, Badge, SearchBar } from '../components/ui';
 import { useCollection } from '../hooks/useCollection';
 import { Asset, ViewType } from '../types';
@@ -19,7 +19,23 @@ export const Assets: React.FC<AssetsProps> = ({ onNavigate, targetId }) => {
   const [selectedCollection, setSelectedCollection] = useState('All');
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [showMagicUpload, setShowMagicUpload] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle targetId for deep linking
+  useEffect(() => {
+    if (targetId && assets.length > 0) {
+      if (targetId === 'MAGIC_UPLOAD') {
+        setShowMagicUpload(true);
+        fileInputRef.current?.click();
+      } else {
+        const asset = assets.find(a => a.id === targetId);
+        if (asset) {
+          setSelectedAsset(asset);
+        }
+      }
+    }
+  }, [targetId, assets]);
 
   // Filter assets
   const filteredAssets = assets.filter(asset => {

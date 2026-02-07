@@ -73,7 +73,9 @@ export function useCollection<T extends { id: string }>(
     );
 
     return () => unsubscribe();
-  }, [collectionName, JSON.stringify(options)]);
+    // Note: options is intentionally not in deps to avoid re-subscription loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collectionName]);
 
   const refresh = useCallback(async () => {
     setLoading(true);

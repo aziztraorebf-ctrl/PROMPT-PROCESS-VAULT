@@ -1,5 +1,11 @@
 // types/index.ts - TypeScript strict definitions
 
+// Firebase Timestamp type
+export interface Timestamp {
+  seconds: number;
+  nanoseconds: number;
+}
+
 export interface Prompt {
   id: string;
   title: string;
@@ -7,8 +13,8 @@ export interface Prompt {
   category: string;
   tags: string[];
   isFavorite: boolean;
-  createdAt: Date;
-  updatedAt?: Date;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
   userId: string;
 }
 
@@ -20,8 +26,8 @@ export interface Asset {
   tags: string[];
   url: string;
   isFavorite: boolean;
-  createdAt: Date;
-  updatedAt?: Date;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
   userId: string;
 }
 
@@ -32,7 +38,8 @@ export interface Framework {
   category: string;
   tags: string[];
   isFavorite: boolean;
-  createdAt: Date;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
   userId: string;
 }
 

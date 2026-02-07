@@ -165,7 +165,7 @@ const ThemeToggle = () => {
 };
 
 // Auth screen
-const AuthScreen = ({ onLogin }: { onLogin: (email: string, password: string) => void }) => {
+const AuthScreen = ({ onLogin }: { onLogin: (email: string, password: string, isSignUp: boolean) => void }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -175,7 +175,7 @@ const AuthScreen = ({ onLogin }: { onLogin: (email: string, password: string) =>
     e.preventDefault();
     setError('');
     try {
-      await onLogin(email, password);
+      await onLogin(email, password, !isLogin);
     } catch (err: any) {
       setError(err.message || 'Authentication failed');
     }
@@ -262,8 +262,12 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
-  const handleLogin = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+  const handleLogin = async (email: string, password: string, isSignUp: boolean) => {
+    if (isSignUp) {
+      await createUserWithEmailAndPassword(auth, email, password);
+    } else {
+      await signInWithEmailAndPassword(auth, email, password);
+    }
   };
 
   const handleLogout = async () => {
