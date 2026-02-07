@@ -1,0 +1,50 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Helper: user owns this document
+    function isOwner() {
+      return request.auth.uid == resource.data.userId;
+    }
+
+    // Helper: new document sets correct userId
+    function setsOwnUserId() {
+      return request.auth.uid == request.resource.data.userId;
+    }
+
+    // Prompts collection
+    match /prompts/{promptId} {
+      allow read: if isAuth() && isOwner();
+      allow create: if isAuth() && setsOwnUserId();
+      allow update: if isAuth() && isOwner();
+      allow delete: if isAuth() && isOwner();
+    }
+
+    // Assets collection
+    match /assets/{assetId} {
+      allow read: if isAuth() && isOwner();
+      allow create: if isAuth() && setsOwnUserId();
+      allow update: if isAuth() && isOwner();
+      allow delete: if isAuth() && isOwner();
+    }
+
+    // Frameworks collection
+    match /frameworks/{frameworkId} {
+      allow read: if isAuth() && isOwner();
+      allow create: if isAuth() && setsOwnUserId();
+      allow update: if isAuth() && isOwner();
+      allow delete: if isAuth() && isOwner();
+    }
+
+    // Deny everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
