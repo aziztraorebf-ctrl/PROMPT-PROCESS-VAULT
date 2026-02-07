@@ -4,7 +4,7 @@
 
 DATE=$(date +%Y-%m-%d)
 TIME=$(date +%H:%M)
-LOG_DIR="$HOME/logs"
+LOG_DIR="$HOME/.clawdbot/logs"
 LOG_FILE="$LOG_DIR/nightly-$DATE.md"
 REPO_DIR="/tmp/PROMPT-PROCESS-VAULT"
 
