@@ -209,10 +209,10 @@ export const Assets: React.FC<AssetsProps> = ({ onNavigate, targetId }) => {
               <h2 className="text-xl font-bold mb-2">{selectedAsset.title}</h2>
               <p className="text-slate-600 dark:text-slate-300 mb-4">{selectedAsset.description}</p>
               
-              <div className="flex items-center gap-2 mb-4">
+              <div className="flex items-center gap-2 mb-4 flex-wrap">
                 <Badge color="purple">{selectedAsset.category}</Badge>
                 {selectedAsset.tags?.map(tag => (
-                  <Badge key={tag} color="gray">{tag}</Badge>
+                  <span key={tag}><Badge color="gray">{tag}</Badge></span>
                 ))}
               </div>
 

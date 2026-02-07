@@ -50,10 +50,14 @@ export function useCollection<T extends { id: string }>(
         
         // Client-side sorting if needed
         if (options.orderByField) {
-          items.sort((a: any, b: any) => {
-            const aVal = a[options.orderByField!];
-            const bVal = b[options.orderByField!];
-            return bVal - aVal; // Descending
+          items.sort((a: T, b: T) => {
+            const field = options.orderByField!;
+            const aVal = (a as Record<string, number | string>)[field] ?? 0;
+            const bVal = (b as Record<string, number | string>)[field] ?? 0;
+            if (typeof aVal === 'number' && typeof bVal === 'number') {
+              return bVal - aVal; // Descending
+            }
+            return String(bVal).localeCompare(String(aVal));
           });
         }
         
@@ -129,9 +133,11 @@ export function useCollection<T extends { id: string }>(
   // Memoized stats
   const stats = useMemo(() => ({
     total: data.length,
-    favorites: data.filter((item: any) => item.isFavorite).length,
-    recent: data.filter((item: any) => {
-      const created = item.createdAt?.seconds || 0;
+    favorites: data.filter((item) => 'isFavorite' in item && item.isFavorite).length,
+    recent: data.filter((item) => {
+      const created = 'createdAt' in item && typeof item.createdAt === 'object' && item.createdAt !== null
+        ? (item.createdAt as { seconds?: number }).seconds || 0
+        : 0;
       const weekAgo = Date.now() / 1000 - 7 * 24 * 60 * 60;
       return created > weekAgo;
     }).length,

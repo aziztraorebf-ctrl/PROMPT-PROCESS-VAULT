@@ -1,6 +1,7 @@
 // views/Frameworks.tsx - Simplified frameworks view
 
 import React, { useState } from 'react';
+import { auth } from '../lib/firebaseConfig';
 import { Button, Card, Badge, SearchBar } from '../components/ui';
 import { useCollection } from '../hooks/useCollection';
 import { Framework, ViewType } from '../types';
@@ -23,7 +24,12 @@ export const Frameworks: React.FC<FrameworksProps> = ({ onNavigate }) => {
 
   const handleCreate = async () => {
     if (!form.title.trim()) return;
-    await addItem(form);
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      alert('You must be logged in to create a framework');
+      return;
+    }
+    await addItem({ ...form, userId, isFavorite: false });
     setShowCreate(false);
     setForm({ title: '', content: '', category: 'Process', tags: [] });
   };

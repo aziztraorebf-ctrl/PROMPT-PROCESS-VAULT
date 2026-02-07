@@ -1,6 +1,7 @@
 // views/Prompts.tsx - Refactored prompts view with split-screen editor
 
 import React, { useState, useMemo } from 'react';
+import { auth } from '../lib/firebaseConfig';
 import { Button, Card, CardHeader, Badge, SearchBar } from '../components/ui';
 import { useCollection } from '../hooks/useCollection';
 import { Prompt, ViewType } from '../types';
@@ -51,7 +52,12 @@ export const Prompts: React.FC<PromptsProps> = ({ onNavigate, targetId }) => {
 
   const handleCreate = async () => {
     if (!form.title.trim()) return;
-    await addItem(form);
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      alert('You must be logged in to create a prompt');
+      return;
+    }
+    await addItem({ ...form, userId });
     setShowCreateModal(false);
     setForm({ title: '', content: '', category: 'Other', tags: [], isFavorite: false });
   };

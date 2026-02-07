@@ -2,6 +2,8 @@
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
+export type { Theme };
+
 export interface Theme {
   mode: ThemeMode;
   colors: {

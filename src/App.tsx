@@ -176,8 +176,9 @@ const AuthScreen = ({ onLogin }: { onLogin: (email: string, password: string, is
     setError('');
     try {
       await onLogin(email, password, !isLogin);
-    } catch (err: any) {
-      setError(err.message || 'Authentication failed');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Authentication failed';
+      setError(message);
     }
   };
 

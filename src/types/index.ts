@@ -63,15 +63,5 @@ export interface QuickActionType {
   targetId?: string;
 }
 
-export interface Theme {
-  mode: 'light' | 'dark' | 'system';
-  colors: {
-    primary: string;
-    secondary: string;
-    background: string;
-    surface: string;
-    text: string;
-    textMuted: string;
-    border: string;
-  };
-}
+// Theme type re-export from lib/theme
+export type { Theme, ThemeMode } from '../lib/theme';

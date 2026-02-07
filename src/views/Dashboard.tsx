@@ -1,6 +1,6 @@
 // views/Dashboard.tsx - New improved dashboard
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { User } from 'firebase/auth';
 import { Button, Card, CardHeader, Badge } from '../components/ui';
 import { useCollection } from '../hooks/useCollection';
@@ -22,8 +22,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNavigate }) => {
   const prompts = useCollection<Prompt>('prompts');
   const assets = useCollection<Asset>('assets');
   const frameworks = useCollection<Framework>('frameworks');
-  
-  const [hoveredCard, setHoveredCard] = useState<string | null>(null);
 
   // Get recent items (last 5)
   const recentItems = useMemo(() => {
@@ -128,8 +126,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNavigate }) => {
                   hover
                   className="cursor-pointer"
                   onClick={() => onNavigate(item.type + 's' as ViewType, item.id)}
-                  onMouseEnter={() => setHoveredCard(item.id)}
-                  onMouseLeave={() => setHoveredCard(null)}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
