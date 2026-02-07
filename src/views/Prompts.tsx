@@ -14,7 +14,8 @@ interface PromptsProps {
 const CATEGORIES = ['All', 'Favorites', 'UI/UX', 'Code', 'Marketing', 'Content', 'Data', 'Design', 'Other'];
 
 export const Prompts: React.FC<PromptsProps> = ({ onNavigate, targetId }) => {
-  const { data: prompts, loading, stats, addItem, updateItem, deleteItem } = useCollection<Prompt>('prompts');
+  const userId = auth.currentUser?.uid;
+  const { data: prompts, loading, stats, addItem, updateItem, deleteItem } = useCollection<Prompt>('prompts', { userId });
   
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -261,7 +262,9 @@ export const Prompts: React.FC<PromptsProps> = ({ onNavigate, targetId }) => {
 
                 {!isEditing && (
                   <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-                    <span>Created: {new Date(selectedPrompt.createdAt?.seconds * 1000).toLocaleDateString()}</span>
+                    <span>Created: {selectedPrompt.createdAt?.seconds 
+                      ? new Date(selectedPrompt.createdAt.seconds * 1000).toLocaleDateString()
+                      : 'Unknown'}</span>
                   </div>
                 )}
               </div>

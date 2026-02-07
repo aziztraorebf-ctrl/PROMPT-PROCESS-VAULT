@@ -17,9 +17,9 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(
         ref={ref}
         onClick={onClick}
         className={`
-          bg-white rounded-xl border border-slate-200
+          bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700
           p-4 transition-all duration-200
-          ${hover ? 'hover:shadow-lg hover:border-slate-300 hover:-translate-y-0.5' : ''}
+          ${hover ? 'hover:shadow-lg hover:border-slate-300 dark:hover:border-slate-600 hover:-translate-y-0.5' : ''}
           ${selected ? 'ring-2 ring-indigo-500 border-indigo-500' : ''}
           ${onClick ? 'cursor-pointer' : ''}
           ${className}

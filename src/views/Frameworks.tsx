@@ -11,7 +11,8 @@ interface FrameworksProps {
 }
 
 export const Frameworks: React.FC<FrameworksProps> = ({ onNavigate }) => {
-  const { data: frameworks, loading, stats, addItem, updateItem, deleteItem } = useCollection<Framework>('frameworks');
+  const userId = auth.currentUser?.uid;
+  const { data: frameworks, loading, stats, addItem, updateItem, deleteItem } = useCollection<Framework>('frameworks', { userId });
   
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -78,7 +79,11 @@ export const Frameworks: React.FC<FrameworksProps> = ({ onNavigate }) => {
                     </div>
                   </div>
                   <button
-                    onClick={() => deleteItem(framework.id)}
+                    onClick={() => {
+                      if (window.confirm('Delete this framework permanently?')) {
+                        deleteItem(framework.id);
+                      }
+                    }}
                     className="text-slate-400 hover:text-red-500"
                   >
                     🗑️

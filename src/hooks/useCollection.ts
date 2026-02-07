@@ -18,6 +18,7 @@ import { db } from '../lib/firebaseConfig';
 import { CollectionName } from '../types';
 
 interface UseCollectionOptions {
+  userId?: string;
   filters?: QueryConstraint[];
   orderByField?: string;
   limitCount?: number;
@@ -35,6 +36,11 @@ export function useCollection<T extends { id: string }>(
     setLoading(true);
     
     let q = collection(db, collectionName);
+    
+    // Filter by userId for security
+    if (options.userId) {
+      q = query(q, where('userId', '==', options.userId)) as typeof q;
+    }
     
     if (options.filters) {
       q = query(q, ...options.filters) as typeof q;

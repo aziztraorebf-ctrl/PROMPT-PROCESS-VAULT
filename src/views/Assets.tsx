@@ -13,7 +13,8 @@ interface AssetsProps {
 const COLLECTIONS = ['All', 'Favorites', 'Marketing & Strategy', 'Development & Code', 'Design & UI/UX', 'Archives / Other'];
 
 export const Assets: React.FC<AssetsProps> = ({ onNavigate, targetId }) => {
-  const { data: assets, loading, stats, addItem, updateItem, deleteItem } = useCollection<Asset>('assets');
+  const userId = auth.currentUser?.uid;
+  const { data: assets, loading, stats, addItem, updateItem, deleteItem } = useCollection<Asset>('assets', { userId });
   
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCollection, setSelectedCollection] = useState('All');

@@ -19,9 +19,10 @@ const quickActions: QuickActionType[] = [
 ];
 
 export const Dashboard: React.FC<DashboardProps> = ({ user, onNavigate }) => {
-  const prompts = useCollection<Prompt>('prompts');
-  const assets = useCollection<Asset>('assets');
-  const frameworks = useCollection<Framework>('frameworks');
+  const userId = user?.uid;
+  const prompts = useCollection<Prompt>('prompts', { userId });
+  const assets = useCollection<Asset>('assets', { userId });
+  const frameworks = useCollection<Framework>('frameworks', { userId });
 
   // Get recent items (last 5)
   const recentItems = useMemo(() => {

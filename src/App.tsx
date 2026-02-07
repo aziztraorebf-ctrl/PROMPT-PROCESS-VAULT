@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged, User, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth } from './lib/firebaseConfig';
 import { useTheme } from './hooks/useTheme';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Dashboard, Prompts, Assets, Frameworks } from './views';
 import { ViewType } from './types';
 
@@ -296,23 +297,25 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex">
-      <ThemeToggle />
+    <ErrorBoundary>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex">
+        <ThemeToggle />
 
-      <Sidebar
-        currentView={currentView}
-        onNavigate={handleNavigate}
-        user={user}
-        onLogout={handleLogout}
-      />
+        <Sidebar
+          currentView={currentView}
+          onNavigate={handleNavigate}
+          user={user}
+          onLogout={handleLogout}
+        />
 
-      <main className="flex-1 overflow-hidden">
-        {currentView === 'dashboard' && <Dashboard user={user} onNavigate={handleNavigate} />}
-        {currentView === 'prompts' && <Prompts onNavigate={handleNavigate} targetId={targetId} />}
-        {currentView === 'assets' && <Assets onNavigate={handleNavigate} targetId={targetId} />}
-        {currentView === 'frameworks' && <Frameworks onNavigate={handleNavigate} />}
-      </main>
-    </div>
+        <main className="flex-1 overflow-hidden">
+          {currentView === 'dashboard' && <Dashboard user={user} onNavigate={handleNavigate} />}
+          {currentView === 'prompts' && <Prompts onNavigate={handleNavigate} targetId={targetId} />}
+          {currentView === 'assets' && <Assets onNavigate={handleNavigate} targetId={targetId} />}
+          {currentView === 'frameworks' && <Frameworks onNavigate={handleNavigate} />}
+        </main>
+      </div>
+    </ErrorBoundary>
   );
 };
 
