@@ -8,16 +8,20 @@ interface CardProps {
   hover?: boolean;
   selected?: boolean;
   onClick?: () => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }
 
 export const Card = forwardRef<HTMLDivElement, CardProps>(
-  ({ children, className = '', hover = true, selected, onClick }, ref) => {
+  ({ children, className = '', hover = true, selected, onClick, onMouseEnter, onMouseLeave }, ref) => {
     return (
       <div
         ref={ref}
         onClick={onClick}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
         className={`
-          bg-white rounded-xl border border-slate-200
+          bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700
           p-4 transition-all duration-200
           ${hover ? 'hover:shadow-lg hover:border-slate-300 hover:-translate-y-0.5' : ''}
           ${selected ? 'ring-2 ring-indigo-500 border-indigo-500' : ''}
@@ -63,7 +67,7 @@ export const CardFooter = ({ children, className = '' }: CardFooterProps) => (
 // Badge component for tags
 interface BadgeProps {
   children: ReactNode;
-  color?: 'blue' | 'purple' | 'green' | 'yellow' | 'red' | 'gray';
+  color?: 'blue' | 'purple' | 'green' | 'yellow' | 'red' | 'gray' | 'emerald';
   size?: 'sm' | 'md';
 }
 
@@ -74,6 +78,7 @@ const badgeColors = {
   yellow: 'bg-yellow-100 text-yellow-700',
   red: 'bg-red-100 text-red-700',
   gray: 'bg-slate-100 text-slate-600',
+  emerald: 'bg-emerald-100 text-emerald-700',
 };
 
 export const Badge = ({ children, color = 'gray', size = 'sm' }: BadgeProps) => (

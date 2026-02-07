@@ -63,15 +63,5 @@ export interface QuickActionType {
   targetId?: string;
 }
 
-export interface Theme {
-  mode: 'light' | 'dark' | 'system';
-  colors: {
-    primary: string;
-    secondary: string;
-    background: string;
-    surface: string;
-    text: string;
-    textMuted: string;
-    border: string;
-  };
-}
+// Theme type is defined in lib/theme.ts - use that as the single source of truth
+export type { Theme } from '../lib/theme';

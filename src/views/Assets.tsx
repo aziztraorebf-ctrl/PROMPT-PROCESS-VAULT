@@ -1,6 +1,7 @@
 // views/Assets.tsx - Refactored assets view with masonry layout
 
 import React, { useState, useRef, useEffect } from 'react';
+import { User } from 'firebase/auth';
 import { Button, Card, Badge, SearchBar } from '../components/ui';
 import { useCollection } from '../hooks/useCollection';
 import { Asset, ViewType } from '../types';
@@ -8,11 +9,12 @@ import { Asset, ViewType } from '../types';
 interface AssetsProps {
   onNavigate: (view: ViewType, targetId?: string) => void;
   targetId?: string;
+  user: User;
 }
 
 const COLLECTIONS = ['All', 'Favorites', 'Marketing & Strategy', 'Development & Code', 'Design & UI/UX', 'Archives / Other'];
 
-export const Assets: React.FC<AssetsProps> = ({ onNavigate, targetId }) => {
+export const Assets: React.FC<AssetsProps> = ({ onNavigate, targetId, user }) => {
   const { data: assets, loading, stats, addItem, updateItem, deleteItem } = useCollection<Asset>('assets');
   
   const [searchQuery, setSearchQuery] = useState('');

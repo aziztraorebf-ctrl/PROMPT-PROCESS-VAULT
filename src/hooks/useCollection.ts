@@ -23,7 +23,12 @@ interface UseCollectionOptions {
   limitCount?: number;
 }
 
-export function useCollection<T extends { id: string }>(
+interface WithFavoriteAndTimestamp {
+  isFavorite?: boolean;
+  createdAt?: { seconds: number; nanoseconds: number };
+}
+
+export function useCollection<T extends { id: string } & WithFavoriteAndTimestamp>(
   collectionName: CollectionName,
   options: UseCollectionOptions = {}
 ) {
@@ -50,10 +55,11 @@ export function useCollection<T extends { id: string }>(
         
         // Client-side sorting if needed
         if (options.orderByField) {
-          items.sort((a: any, b: any) => {
-            const aVal = a[options.orderByField!];
-            const bVal = b[options.orderByField!];
-            return bVal - aVal; // Descending
+          const field = options.orderByField as keyof T;
+          items.sort((a, b) => {
+            const aVal = a[field];
+            const bVal = b[field];
+            return Number(bVal) - Number(aVal); // Descending
           });
         }
         
@@ -113,7 +119,7 @@ export function useCollection<T extends { id: string }>(
     }
   }, [collectionName]);
 
-  const addItem = useCallback(async (data: Omit<T, 'id'>) => {
+  const addItem = useCallback(async (data: Omit<T, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
       const docRef = await addDoc(collection(db, collectionName), {
         ...data,
@@ -129,9 +135,9 @@ export function useCollection<T extends { id: string }>(
   // Memoized stats
   const stats = useMemo(() => ({
     total: data.length,
-    favorites: data.filter((item: any) => item.isFavorite).length,
-    recent: data.filter((item: any) => {
-      const created = item.createdAt?.seconds || 0;
+    favorites: data.filter((item) => item.isFavorite).length,
+    recent: data.filter((item) => {
+      const created = item.createdAt?.seconds ?? 0;
       const weekAgo = Date.now() / 1000 - 7 * 24 * 60 * 60;
       return created > weekAgo;
     }).length,

@@ -176,8 +176,8 @@ const AuthScreen = ({ onLogin }: { onLogin: (email: string, password: string, is
     setError('');
     try {
       await onLogin(email, password, !isLogin);
-    } catch (err: any) {
-      setError(err.message || 'Authentication failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Authentication failed');
     }
   };
 
@@ -307,9 +307,9 @@ const App = () => {
 
       <main className="flex-1 overflow-hidden">
         {currentView === 'dashboard' && <Dashboard user={user} onNavigate={handleNavigate} />}
-        {currentView === 'prompts' && <Prompts onNavigate={handleNavigate} targetId={targetId} />}
-        {currentView === 'assets' && <Assets onNavigate={handleNavigate} targetId={targetId} />}
-        {currentView === 'frameworks' && <Frameworks onNavigate={handleNavigate} />}
+        {currentView === 'prompts' && <Prompts onNavigate={handleNavigate} targetId={targetId} user={user} />}
+        {currentView === 'assets' && <Assets onNavigate={handleNavigate} targetId={targetId} user={user} />}
+        {currentView === 'frameworks' && <Frameworks onNavigate={handleNavigate} user={user} />}
       </main>
     </div>
   );

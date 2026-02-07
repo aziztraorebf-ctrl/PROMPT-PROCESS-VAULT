@@ -1,15 +1,17 @@
 // views/Frameworks.tsx - Simplified frameworks view
 
 import React, { useState } from 'react';
+import { User } from 'firebase/auth';
 import { Button, Card, Badge, SearchBar } from '../components/ui';
 import { useCollection } from '../hooks/useCollection';
 import { Framework, ViewType } from '../types';
 
 interface FrameworksProps {
   onNavigate: (view: ViewType, targetId?: string) => void;
+  user: User;
 }
 
-export const Frameworks: React.FC<FrameworksProps> = ({ onNavigate }) => {
+export const Frameworks: React.FC<FrameworksProps> = ({ onNavigate, user }) => {
   const { data: frameworks, loading, stats, addItem, updateItem, deleteItem } = useCollection<Framework>('frameworks');
   
   const [searchQuery, setSearchQuery] = useState('');
@@ -23,7 +25,7 @@ export const Frameworks: React.FC<FrameworksProps> = ({ onNavigate }) => {
 
   const handleCreate = async () => {
     if (!form.title.trim()) return;
-    await addItem(form);
+    await addItem({ ...form, isFavorite: false, userId: user.uid });
     setShowCreate(false);
     setForm({ title: '', content: '', category: 'Process', tags: [] });
   };
@@ -72,7 +74,7 @@ export const Frameworks: React.FC<FrameworksProps> = ({ onNavigate }) => {
                     </div>
                   </div>
                   <button
-                    onClick={() => deleteItem(framework.id)}
+                    onClick={() => { if (window.confirm('Delete this framework permanently?')) deleteItem(framework.id); }}
                     className="text-slate-400 hover:text-red-500"
                   >
                     🗑️

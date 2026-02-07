@@ -1,6 +1,7 @@
 // views/Prompts.tsx - Refactored prompts view with split-screen editor
 
 import React, { useState, useMemo } from 'react';
+import { User } from 'firebase/auth';
 import { Button, Card, CardHeader, Badge, SearchBar } from '../components/ui';
 import { useCollection } from '../hooks/useCollection';
 import { Prompt, ViewType } from '../types';
@@ -8,11 +9,12 @@ import { Prompt, ViewType } from '../types';
 interface PromptsProps {
   onNavigate: (view: ViewType, targetId?: string) => void;
   targetId?: string;
+  user: User;
 }
 
 const CATEGORIES = ['All', 'Favorites', 'UI/UX', 'Code', 'Marketing', 'Content', 'Data', 'Design', 'Other'];
 
-export const Prompts: React.FC<PromptsProps> = ({ onNavigate, targetId }) => {
+export const Prompts: React.FC<PromptsProps> = ({ onNavigate, targetId, user }) => {
   const { data: prompts, loading, stats, addItem, updateItem, deleteItem } = useCollection<Prompt>('prompts');
   
   const [searchQuery, setSearchQuery] = useState('');
@@ -51,7 +53,7 @@ export const Prompts: React.FC<PromptsProps> = ({ onNavigate, targetId }) => {
 
   const handleCreate = async () => {
     if (!form.title.trim()) return;
-    await addItem(form);
+    await addItem({ ...form, userId: user.uid });
     setShowCreateModal(false);
     setForm({ title: '', content: '', category: 'Other', tags: [], isFavorite: false });
   };
@@ -255,7 +257,7 @@ export const Prompts: React.FC<PromptsProps> = ({ onNavigate, targetId }) => {
 
                 {!isEditing && (
                   <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-                    <span>Created: {new Date(selectedPrompt.createdAt?.seconds * 1000).toLocaleDateString()}</span>
+                    <span>Created: {selectedPrompt.createdAt ? new Date(selectedPrompt.createdAt.seconds * 1000).toLocaleDateString() : 'Unknown'}</span>
                   </div>
                 )}
               </div>
